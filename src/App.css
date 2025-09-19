@@ -2,7 +2,7 @@
   max-width: 100%;
   max-height: 100%;
   padding: 6rem 3rem 3rem 3rem;
-  text-align: center;
+  text-align: left;
   overflow-y: auto;
   position: relative;
 }
@@ -181,7 +181,7 @@ label:has(input[type="checkbox"]) * {
 .assets-divider {
   border: none;
   border-top: 1px solid var(--color-gray-100);
-  margin: 0;
+  /* margin: 0; */
   width: 100%;
 }
 
@@ -393,6 +393,23 @@ label:has(input[type="checkbox"]) * {
   white-space: nowrap;
 }
 
+/* Compact, subtle button variant that stays consistent with .btn */
+.btn-compact {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 11px !important;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+  background-color: rgb(243, 243, 243);
+  color: var(--lighter-black);
+  /* border: 1px solid var(--color-gray-300); */
+}
+
+.btn-compact:hover {
+  background-color: rgb(230, 230, 230);
+  cursor: pointer;
+}
+
 .pagination-row {
   display: flex;
   width: 100%;
@@ -403,6 +420,18 @@ label:has(input[type="checkbox"]) * {
 .pagination-center {
   display: flex;
   align-items: center;
+}
+
+/* Ensure inputs stack vertically (one per line) in forms where applied */
+.stack-inputs > * {
+  grid-column: 1 / -1 !important; /* span full width of grid */
+}
+
+/* Footer row at the end of forms/steps to house navigation buttons */
+.form-actions {
+  border-top: 1px solid var(--color-gray-100);
+  margin-top: 24px;
+  padding-top: 16px;
 }
 
 details > summary:hover {
@@ -419,12 +448,13 @@ summary::-webkit-details-marker {
 
 details > summary {
   transition: background 0.2s;
-  padding: 12px 8px;
+  padding: 12px 8px 12px 28px; /* add left padding so icon doesn't overlap text */
   height: 100%;
   box-sizing: border-box;
   position: relative;
   cursor: pointer;
   user-select: none;
+  border-radius: 8px; /* rounded when collapsed */
 }
 
 details > summary * {
@@ -437,8 +467,8 @@ details > summary::before {
   left: 0;
   top: 50%;
   transform: translateY(-50%) rotate(0deg);
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   margin-left: 4px;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1' stroke='%23151515'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m19.5 8.25-7.5 7.5-7.5-7.5' /%3E%3C/svg%3E");
   background-size: contain;
@@ -452,6 +482,24 @@ details > summary::before {
 
 details[open] > summary::before {
   transform: translateY(-50%) rotate(180deg);
+}
+
+/* When open, square off bottom corners so summary and content form a single card */
+details[open] > summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* Larger chevron icons for environment summaries */
+details > summary.environment-summary::before {
+  width: 24px;
+  height: 24px;
+  margin-left: 8px;
+}
+
+/* Add left padding to environment summary text to create more space from chevron */
+details > summary.environment-summary {
+  padding-left: 40px;
 }
 
 .thumbnail-header {
@@ -663,6 +711,7 @@ label:has(input[type="checkbox"]):hover, label > input[type="checkbox"]:hover {
   background-position: 8px center !important;
   background-size: 18px !important;
 }
+
 
 /* Prevent text selection on placeholder text */
 .search-input::placeholder {

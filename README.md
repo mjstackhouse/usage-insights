@@ -1,11 +1,20 @@
-# Asset Description Auditor for Kontent.ai
+# Kontent.ai Usage Insights Tool
 
-This is a tool designed for [Kontent.ai](https://kontent.ai/) users who want to review and improve the quality of their asset metadata— specifically, the descriptions of their digital assets (like images, documents, and other files). You can try it out [here](https://asset-description-auditor.netlify.app/).
+This is a comprehensive tool designed for [Kontent.ai](https://kontent.ai/) users who want to analyze their usage metrics across environments and gain insights into their content management patterns. The tool provides detailed usage analytics similar to the official Kontent.ai usage report, but with environment-level granularity.
 
 ![Preview of the tool](asset-description-auditor-demo.gif)
 
 ## What does it do?
 
+### Usage Insights Features
+- **Analyzes usage metrics** across single or multiple Kontent.ai environments
+- **Collects comprehensive data** including content items, content types, languages, assets, storage usage, and collections
+- **Supports multiple API access levels** - works with Delivery API, Management API, and Subscription API keys
+- **Provides environment-level insights** that complement the subscription-wide Kontent.ai usage report
+- **Exports detailed reports** in Excel, JSON, and CSV formats for further analysis
+- **Progressive data collection** - shows what data is available based on your API key permissions
+
+### Legacy Asset Description Auditor Features
 - **Connects to your Kontent.ai environment** using your Environment ID and Management API Key (with "Read assets" permission).
 - **Fetches all assets** in your environment and displays them in a clear, filterable table.
 - **Shows which assets are missing descriptions** in any of your project's languages, helping you spot gaps in your metadata.
@@ -17,12 +26,27 @@ This is a tool designed for [Kontent.ai](https://kontent.ai/) users who want to 
 
 ## Who is it for?
 
+### Usage Insights Tool
+- **Subscription administrators** who need detailed insights into usage across all environments
+- **Project managers** who want to understand content distribution and storage patterns
+- **Technical teams** who need to monitor API usage and optimize performance
+- **Business stakeholders** who want to understand the value and utilization of their Kontent.ai investment
+
+### Legacy Asset Description Auditor
 - **Content managers** and **editors** who want to ensure all assets are properly described for localization, accessibility, or SEO.
 - **Project owners** who need a quick audit of asset metadata completeness across multiple languages.
 - **Anyone working with Kontent.ai** who wants to improve the quality and findability of their digital assets.
 
 ## How does it help?
 
+### Usage Insights Tool
+- **Provides granular insights:** See usage metrics at the environment level, not just subscription-wide
+- **Identifies optimization opportunities:** Understand which environments consume the most resources
+- **Supports capacity planning:** Track growth patterns and plan for future needs
+- **Enables cost optimization:** Identify unused or underutilized environments
+- **Facilitates compliance:** Generate detailed reports for auditing and compliance requirements
+
+### Legacy Asset Description Auditor
 - **Saves time:** No need to manually check each asset— see everything at a glance.
 - **Improves quality:** Quickly identify and fix missing or incomplete descriptions.
 - **Supports localization:** Ensure all assets are described in every required language.
@@ -30,7 +54,26 @@ This is a tool designed for [Kontent.ai](https://kontent.ai/) users who want to 
 
 ## How to use it
 
-### Option 1: Standalone Tool
+### Usage Insights Tool
+
+#### Single Environment Analysis
+1. **Select "Single Environment" mode**
+2. **Enter your Environment ID and available API keys** (Delivery, Management, or both)
+3. **Click "Collect Usage Data"** to analyze the environment
+4. **Review the metrics** including content items, types, languages, assets, and storage
+5. **Export the report** in Excel, JSON, or CSV format
+
+#### Subscription-Wide Analysis
+1. **Select "All Environments" mode**
+2. **Enter your Subscription ID and Subscription API Key**
+3. **Add environment credentials** for each environment you want to analyze
+4. **Click "Collect Usage Data"** to analyze all environments
+5. **Review comprehensive metrics** across all environments
+6. **Export detailed reports** for further analysis
+
+### Legacy Asset Description Auditor
+
+#### Option 1: Standalone Tool
 1. **Enter your Kontent.ai Environment ID and Management API Key.**
 2. Click **Get assets**.
 3. Review the overview and asset table to see which assets are missing descriptions.

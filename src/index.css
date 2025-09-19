@@ -5,7 +5,7 @@ html {
   font-optical-sizing: auto;
   font-weight: 400;
   font-style: normal;
-  font-size: 12px !important;
+  font-size: 14px !important;
 }
 
 @theme {
@@ -87,7 +87,7 @@ input, .show-only-checkbox-label {
   display: none;
 }
 
-input[type="text"], input[type="date"], input[type="number"], select {
+input[type="text"], input[type="date"], input[type="number"], input[type="password"], select {
   flex-basis: 100%;
   border: 1px solid var(--color-gray-400);
   border-radius: 9999px;
@@ -95,11 +95,11 @@ input[type="text"], input[type="date"], input[type="number"], select {
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-input[type="text"]:hover, input[type="date"]:hover, input[type="number"]:hover, select:hover {
+input[type="text"]:hover, input[type="date"]:hover, input[type="number"]:hover, input[type="password"]:hover, select:hover {
   border-color: var(--lighter-black);
 }
 
-input[type="text"]:focus, input[type="date"]:focus, input[type="number"]:focus, select:focus {
+input[type="text"]:focus, input[type="date"]:focus, input[type="number"]:focus, input[type="password"]:focus, select:focus {
   border-color: var(--lighter-black);
   outline: none;
 }

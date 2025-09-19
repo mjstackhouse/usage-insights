@@ -3,25 +3,33 @@ import { AssetModels, createManagementClient, LanguageModels, ManagementClient }
 import './App.css'
 import Select from 'react-select';
 import * as XLSX from 'xlsx';
-
-interface Map {
-  [key: string]: any;
-}
-
-// Helper to export overview data to Excel
-interface OverviewRow {
-  id: string;
-  name: string;
-  percent: number;
-  withDescription: number;
-  total: number;
-  fullyDescribed: number;
-  isDefault: boolean;
-}
+import type { 
+  AppState, 
+  EnvironmentCredentials, 
+  EnvironmentData
+} from './types';
+import { KontentApiClient, SubscriptionApiClient } from './api-clients';
 
 let customAppSDK: any = null;
 
 function App() {
+  // Main app state
+  const [appState, setAppState] = useState<AppState>({
+    mode: 'single',
+    credentials: {
+      environments: []
+    },
+    data: {
+      environments: []
+    },
+    ui: {
+      currentStep: 'mode-selection',
+      loadingStates: {},
+      errors: {}
+    }
+  });
+
+  // Legacy state for backward compatibility (will be removed)
   const [environmentId, setEnvironmentId] = useState<string>('');
   const [environmentIdInputValue, setEnvironmentIdInputValue] = useState<string>('');
   const [languages, setLanguages] = useState<Array<LanguageModels.LanguageModel>>();
@@ -48,8 +56,386 @@ function App() {
   const [apiKeyInvalid, setApiKeyInvalid] = useState(false);
   const [apiKeyErrorFromConfig, setApiKeyErrorFromConfig] = useState(false);
 
+  // New state for usage insights
+  const [subscriptionId, setSubscriptionId] = useState<string>('');
+  const [subscriptionApiKey, setSubscriptionApiKey] = useState<string>('');
+  const [environmentCredentials, setEnvironmentCredentials] = useState<EnvironmentCredentials[]>([]);
+  const [isCollectingData, setIsCollectingData] = useState(false);
+  const [collectionProgress, setCollectionProgress] = useState<Record<string, string>>({});
+  const [projectEnvMap, setProjectEnvMap] = useState<Record<string, { project: string; projectId: string; envName: string }>>({});
+  const [subscriptionIdErrorText, setSubscriptionIdErrorText] = useState<string>('');
+  const [subscriptionApiKeyErrorText, setSubscriptionApiKeyErrorText] = useState<string>('');
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [apiKeyValidationErrors, setApiKeyValidationErrors] = useState<Record<string, string>>({});
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
 
-  function exportOverviewToExcel(overviewData: OverviewRow[], totalAssets?: number, fullyDescribed?: number) {
+  // New functions for usage insights
+  const handleModeSelection = (mode: 'single' | 'subscription') => {
+    setAppState(prev => ({
+      ...prev,
+      mode,
+      ui: {
+        ...prev.ui,
+        currentStep: 'credentials'
+      }
+    }));
+
+    // Ensure at least one environment is present in single mode
+    if (mode === 'single') {
+      setEnvironmentCredentials(prev => {
+        // If SDK context is available, use that environment ID
+        if (sdkResponse?.context?.environmentId) {
+          const envId = sdkResponse.context.environmentId;
+          const exists = prev.some(c => c.environmentId === envId);
+          if (exists) return prev;
+          return [...prev, { environmentId: envId, deliveryApiKey: '', managementApiKey: '', subscriptionApiKey: '', subscriptionId: '' }];
+        }
+        // If no SDK context or no environments exist, add an empty one
+        if (prev.length === 0) {
+          return [{ environmentId: '', deliveryApiKey: '', managementApiKey: '', subscriptionApiKey: '', subscriptionId: '' }];
+        }
+        return prev;
+      });
+    }
+  };
+
+  const addEnvironmentCredential = () => {
+    const newCredential: EnvironmentCredentials = {
+      environmentId: '',
+      deliveryApiKey: '',
+      managementApiKey: '',
+      subscriptionApiKey: '',
+      subscriptionId: ''
+    };
+    setEnvironmentCredentials(prev => [...prev, newCredential]);
+    // Clear validation errors when adding environment
+    setValidationErrors([]);
+    setApiKeyValidationErrors({});
+    
+    // Hide all API key error elements
+    document.querySelectorAll('[id^="api-key-error-"]').forEach(element => {
+      (element as HTMLElement).style.display = 'none';
+    });
+  };
+
+  const updateEnvironmentCredential = (index: number, field: keyof EnvironmentCredentials, value: string) => {
+    setEnvironmentCredentials(prev => 
+      prev.map((cred, i) => 
+        i === index ? { ...cred, [field]: value } : cred
+      )
+    );
+    // Clear validation errors when user makes changes
+    setValidationErrors([]);
+    // Clear API key validation errors for this specific field
+    setApiKeyValidationErrors(prev => {
+      const newErrors = { ...prev };
+      delete newErrors[`env-${index}-${field.replace('ApiKey', '').replace('Id', '')}`];
+      return newErrors;
+    });
+    
+    // Hide the error element for this field
+    const errorElement = document.getElementById(`api-key-error-env-${index}-${field.replace('ApiKey', '').replace('Id', '')}`) as HTMLElement;
+    if (errorElement) {
+      errorElement.style.display = 'none';
+    }
+  };
+
+  const removeEnvironmentCredential = (index: number) => {
+    setEnvironmentCredentials(prev => prev.filter((_, i) => i !== index));
+    // Clear validation errors when removing environment
+    setValidationErrors([]);
+    setApiKeyValidationErrors({});
+    
+    // Hide all API key error elements
+    document.querySelectorAll('[id^="api-key-error-"]').forEach(element => {
+      (element as HTMLElement).style.display = 'none';
+    });
+  };
+
+  // Apply the current environment's keys to all environments within the same project (subscription analysis helper)
+  const applyKeysToSameProject = (index: number) => {
+    const source = environmentCredentials[index];
+    if (!source || !source.environmentId) return;
+    const projectId = projectEnvMap[source.environmentId]?.projectId;
+    if (!projectId) return;
+
+    setEnvironmentCredentials(prev => prev.map((cred) => {
+      const belongsToSameProject = projectEnvMap[cred.environmentId]?.projectId === projectId;
+      if (!belongsToSameProject) return cred;
+      return {
+        ...cred,
+        deliveryApiKey: source.deliveryApiKey || '',
+        managementApiKey: source.managementApiKey || '',
+        subscriptionApiKey: source.subscriptionApiKey || '',
+        subscriptionId: source.subscriptionId || cred.subscriptionId || ''
+      };
+    }));
+  };
+
+  // Validate that all environments have at least one API key
+  const validateEnvironmentCredentials = (): { isValid: boolean; errors: string[] } => {
+    const errors: string[] = [];
+    
+    environmentCredentials.forEach((cred, index) => {
+      if (!cred.environmentId.trim()) {
+        errors.push(`Environment ${index + 1}: Environment ID is required`);
+        return;
+      }
+      
+      const hasAnyKey = cred.deliveryApiKey?.trim() || 
+                       cred.managementApiKey?.trim() || 
+                       cred.subscriptionApiKey?.trim();
+      
+      if (!hasAnyKey) {
+        errors.push(`Environment ${index + 1}: At least one API key is required (Delivery, Management, or Subscription)`);
+      }
+    });
+    
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  };
+
+  // Test API key validity before data collection
+  const testApiKeyValidity = async (): Promise<{ isValid: boolean; errors: Record<string, string> }> => {
+    const errors: Record<string, string> = {};
+    
+    for (let i = 0; i < environmentCredentials.length; i++) {
+      const cred = environmentCredentials[i];
+      if (!cred.environmentId.trim()) continue;
+      
+      // Test Delivery API key if provided
+      if (cred.deliveryApiKey?.trim()) {
+        try {
+          const client = new KontentApiClient(cred);
+          const testResult = await client.testDeliveryApiKey(cred.environmentId, cred.deliveryApiKey);
+          if (!testResult.success) {
+            errors[`env-${i}-delivery`] = typeof testResult.error === 'string' ? testResult.error : 'Invalid Delivery API key';
+          }
+        } catch (error) {
+          errors[`env-${i}-delivery`] = 'Failed to test Delivery API key';
+        }
+      }
+      
+      // Test Management API key if provided
+      if (cred.managementApiKey?.trim()) {
+        try {
+          const client = new KontentApiClient(cred);
+          const testResult = await client.testManagementApiKey(cred.environmentId, cred.managementApiKey);
+          if (!testResult.success) {
+            errors[`env-${i}-management`] = typeof testResult.error === 'string' ? testResult.error : 'Invalid Management API key';
+          }
+        } catch (error) {
+          errors[`env-${i}-management`] = 'Failed to test Management API key';
+        }
+      }
+      
+      // Test Subscription API key if provided
+      if (cred.subscriptionApiKey?.trim() && cred.subscriptionId?.trim()) {
+        try {
+          const subClient = new SubscriptionApiClient(cred.subscriptionId, cred.subscriptionApiKey);
+          const testResult = await subClient.testSubscriptionApiKey();
+          if (!testResult.success) {
+            errors[`env-${i}-subscription`] = typeof testResult.error === 'string' ? testResult.error : 'Invalid Subscription API key';
+          }
+        } catch (error) {
+          errors[`env-${i}-subscription`] = 'Failed to test Subscription API key';
+        }
+      }
+    }
+    
+    return {
+      isValid: Object.keys(errors).length === 0,
+      errors
+    };
+  };
+
+  // Check if the form is valid for enabling/disabling the collect button
+  const isFormValid = (): boolean => {
+    return validateEnvironmentCredentials().isValid;
+  };
+
+  const collectUsageData = async () => {
+    // Validate credentials before proceeding
+    const validation = validateEnvironmentCredentials();
+    setValidationErrors(validation.errors);
+    
+    if (!validation.isValid) {
+      return;
+    }
+
+    // Test API key validity before proceeding
+    setIsCollectingData(true);
+    setApiKeyValidationErrors({});
+    
+    // Hide all API key error elements before testing
+    document.querySelectorAll('[id^="api-key-error-"]').forEach(element => {
+      (element as HTMLElement).style.display = 'none';
+    });
+    
+    const apiKeyValidation = await testApiKeyValidity();
+    setApiKeyValidationErrors(apiKeyValidation.errors);
+    
+    if (!apiKeyValidation.isValid) {
+      // Show error elements for invalid API keys
+      Object.keys(apiKeyValidation.errors).forEach(errorKey => {
+        const errorElement = document.getElementById(`api-key-error-${errorKey}`) as HTMLElement;
+        if (errorElement) {
+          errorElement.style.display = 'block';
+        }
+      });
+      setIsCollectingData(false);
+      return;
+    }
+
+    setCollectionProgress({});
+    
+    const environments: EnvironmentData[] = [];
+    
+    try {
+      for (let i = 0; i < environmentCredentials.length; i++) {
+        const cred = environmentCredentials[i];
+        if (!cred.environmentId) continue;
+        
+        setCollectionProgress(prev => ({
+          ...prev,
+          [cred.environmentId]: 'Collecting data...'
+        }));
+        
+        const client = new KontentApiClient(cred);
+        const result = await client.collectEnvironmentData(cred.environmentId, cred);
+        
+        if (result.success && result.data) {
+          environments.push(result.data);
+          setCollectionProgress(prev => ({
+            ...prev,
+            [cred.environmentId]: 'Completed'
+          }));
+        } else {
+          setCollectionProgress(prev => ({
+            ...prev,
+            [cred.environmentId]: `Error: ${result.error}`
+          }));
+        }
+      }
+      
+      setAppState(prev => ({
+        ...prev,
+        data: {
+          ...prev.data,
+          environments
+        },
+        ui: {
+          ...prev.ui,
+          currentStep: 'results'
+        }
+      }));
+
+      // Scroll to top after successful data collection
+      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const scrollBehavior = prefersReducedMotion ? 'auto' : 'smooth';
+      window.scrollTo({ top: 0, behavior: scrollBehavior });
+    } catch (error) {
+      console.error('Error collecting data:', error);
+    } finally {
+      setIsCollectingData(false);
+    }
+  };
+
+  const exportUsageReport = (format: 'excel' | 'json' | 'csv') => {
+    const { environments } = appState.data;
+    if (!environments.length) return;
+
+    if (format === 'excel') {
+      exportUsageToExcel(environments);
+    } else if (format === 'json') {
+      exportUsageToJson(environments);
+    } else if (format === 'csv') {
+      exportUsageToCsv(environments);
+    }
+  };
+
+  const exportUsageToExcel = (environments: EnvironmentData[]) => {
+    const wsData = [
+      ['Environment ID', 'Name', 'Content Items', 'Content Types', 'Languages', 'Assets', 'Storage Size (MB)', 'Collections', 'Custom Roles', 'Spaces', 'Active Users', 'Last Updated'],
+      ...environments.map(env => [
+        env.environmentId,
+        env.name,
+        env.metrics.contentItems,
+        env.metrics.contentTypes,
+        env.metrics.languages,
+        env.metrics.assetCount,
+        Math.round(env.metrics.assetStorageSize / 1024 / 1024 * 100) / 100,
+        env.metrics.collections,
+        env.metrics.customRoles,
+        env.metrics.spaces,
+        env.metrics.activeUsers,
+        new Date(env.lastUpdated).toLocaleDateString()
+      ])
+    ];
+    
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Usage Report');
+    XLSX.writeFile(wb, `kontent-usage-report-${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const exportUsageToJson = (environments: EnvironmentData[]) => {
+    const data = {
+      generatedAt: new Date().toISOString(),
+      environments: environments.map(env => ({
+        ...env,
+        metrics: {
+          ...env.metrics,
+          assetStorageSizeMB: Math.round(env.metrics.assetStorageSize / 1024 / 1024 * 100) / 100
+        }
+      }))
+    };
+    
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kontent-usage-report-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportUsageToCsv = (environments: EnvironmentData[]) => {
+    const csvData = [
+      'Environment ID,Name,Content Items,Content Types,Languages,Assets,Storage Size (MB),Collections,Custom Roles,Spaces,Active Users,Last Updated',
+      ...environments.map(env => 
+        `${env.environmentId},${env.name},${env.metrics.contentItems},${env.metrics.contentTypes},${env.metrics.languages},${env.metrics.assetCount},${Math.round(env.metrics.assetStorageSize / 1024 / 1024 * 100) / 100},${env.metrics.collections},${env.metrics.customRoles},${env.metrics.spaces},${env.metrics.activeUsers},${new Date(env.lastUpdated).toLocaleDateString()}`
+      )
+    ].join('\n');
+    
+    const blob = new Blob([csvData], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kontent-usage-report-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Helper function to format metric values based on API key availability
+  const formatMetricValue = (value: number, apiKeyRequired: string, hasApiKey: boolean) => {
+    if (hasApiKey) {
+      return value.toString();
+    }
+    return (
+      <span 
+        className="text-gray-400 italic cursor-help" 
+        title={`Requires ${apiKeyRequired}`}
+      >
+        Unavailable
+      </span>
+    );
+  };
+
+  // Legacy functions (keeping for backward compatibility)
+  function exportOverviewToExcel(overviewData: any[], totalAssets?: number, fullyDescribed?: number) {
     if (!overviewData || overviewData.length === 0) return;
     const wsData = [
       [
@@ -65,7 +451,7 @@ function App() {
         'Number with Description',
         'Default Language',
       ],
-      ...overviewData.map((lang: OverviewRow) => [
+      ...overviewData.map((lang: any) => [
         lang.name,
         `${lang.percent}%`,
         `${lang.withDescription}`,
@@ -248,7 +634,7 @@ function App() {
                   if (environmentIdError) environmentIdError.style.display = 'none';
 
                   const activeLanguages = langResponse.data.items.filter((lang) => lang.isActive === true);
-                  const map: Map = {};
+                  const map: Record<string, string> = {};
                   
                   activeLanguages.map((lang) => {
                     map[lang.id] = lang.name;
@@ -301,7 +687,7 @@ function App() {
   }
 
   async function getContext() {
-    let response;
+    let response: any;
 
     if (customAppSDK !== null) {
       response = await customAppSDK.getCustomAppContext();
@@ -313,6 +699,33 @@ function App() {
       else {
         if (response.context.environmentId) {
           setEnvironmentId(response.context.environmentId);
+          // Auto-add current environment to Single Environment analysis list
+          setEnvironmentCredentials(prev => {
+            const exists = prev.some(c => c.environmentId === response.context.environmentId);
+            if (exists) return prev;
+            if (appState.mode !== 'single') return prev; // only for Single Environment flow
+            
+            // If we have an empty environment, replace it with the SDK environment
+            if (prev.length === 1 && prev[0].environmentId === '') {
+              return [{
+                environmentId: response.context.environmentId,
+                deliveryApiKey: '',
+                managementApiKey: '',
+                subscriptionApiKey: '',
+                subscriptionId: ''
+              }];
+            }
+            
+            // Otherwise, add a new environment
+            const newCred: EnvironmentCredentials = {
+              environmentId: response.context.environmentId,
+              deliveryApiKey: '',
+              managementApiKey: '',
+              subscriptionApiKey: '',
+              subscriptionId: ''
+            };
+            return [...prev, newCred];
+          });
         }
 
         setSdkResponse({...response});
@@ -650,9 +1063,693 @@ function App() {
     return (
     <>
       {sdkLoaded && (
-        <p id='app-title' className='absolute top-0 right-0 left-0 py-4 pl-[3rem] text-left text-white z-10'>Asset description auditor</p>
+        <p id='app-title' className='absolute top-0 right-0 left-0 py-4 pl-[3rem] text-left text-white z-10'>
+          Usage Insights
+        </p>
       )}
- 
+
+      {/* New Usage Insights UI */}
+      {appState.ui.currentStep === 'mode-selection' && (
+        <div className='basis-full flex flex-wrap place-content-start'>
+          <div className='basis-full mb-6'>
+            {/* <h1 className='text-2xl font-bold mb-4'>Usage Insights</h1> */}
+            <p className='text-gray-600'>
+              Analyze your Kontent.ai usage metrics across environments. Choose your analysis mode:
+            </p>
+          </div>
+          
+          <div className='basis-full grid grid-cols-1 md:grid-cols-2 gap-6'>
+            <div 
+              className='rounded-lg p-6 cursor-pointer transition-colors'
+              style={{ backgroundColor: 'rgb(243, 243, 243)' }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgb(230, 230, 230)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgb(243, 243, 243)'}
+              onClick={() => handleModeSelection('single')}
+            >
+              <h3 className='text-lg font-semibold mb-2'>Single environment</h3>
+              <p className='text-gray-600 mb-4'>
+                Analyze usage metrics for individually-added environments. Requires at least one API key to retrieve any metrics.
+              </p>
+              <div className='text-sm text-gray-500'>
+                <strong>Required:</strong> Environment ID<br/>
+                <strong>Optional:</strong> Delivery Preview API Key, Management API Key, Subscription ID + Subscription API Key<br/>
+                {/* <strong>Optional:</strong> Management API Key<br/> */}
+                {/* <strong>Optional:</strong> Subscription ID + Subscription API Key<br/> */}
+              </div>
+            </div>
+            
+            <div 
+              className='rounded-lg p-6 cursor-pointer transition-colors'
+              style={{ backgroundColor: 'rgb(243, 243, 243)' }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgb(230, 230, 230)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgb(243, 243, 243)'}
+              onClick={() => handleModeSelection('subscription')}
+            >
+              <h3 className='text-lg font-semibold mb-2'>All environments</h3>
+              <p className='text-gray-600 mb-4'>
+                Analyze usage metrics across all environments in your subscription. Requires Subscription API access.
+              </p>
+              <div className='text-sm text-gray-500'>
+                <strong>Required:</strong> Subscription ID + Subscription API Key<br/>
+                <strong>Optional:</strong> Delivery Preview API Keys, Management API Keys
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {appState.ui.currentStep === 'credentials' && (
+        <div className="basis-full">
+          <div className='basis-full'>
+            <h2 className='text-xl font-bold mb-2'>
+              {appState.mode === 'single' ? 'Single environment analysis' : 'Subscription analysis'}
+            </h2>
+            <p className='text-gray-600 mb-4'>
+              {appState.mode === 'single' 
+                ? 'Enter your environment credentials to analyze usage metrics.'
+                : 'Enter your subscription credentials and environment API keys.'
+              }
+            </p>
+          </div>
+
+          {appState.mode === 'single' && (
+            <details className='mb-12'>
+              <summary className='text-sm font-semibold text-left cursor-pointer bg-[rgb(243,243,243)]'>
+                About metrics and keys
+              </summary>
+              <div className='rounded-b-lg px-4 pb-4 pt-2 text-left bg-[rgb(243,243,243)]'>
+                <ul className='list-disc pl-5 space-y-1 text-sm text-gray-700'>
+                  <li>
+                    <span className='font-medium'>Delivery API key</span>: Used for Delivery API requests. Provides counts for
+                    content items, content types, and languages.
+                  </li>
+                  <li>
+                    <span className='font-medium'>Management API key</span>: Used for Management API requests. Provides
+                    asset metrics (asset count and total storage size) and collections.
+                  </li>
+                  <li>
+                    <span className='font-medium'>Subscription API key + Subscription ID</span>: Used for Subscription API
+                    requests. Provides active user counts per environment and loads
+                    projects/environments in Subscription Analysis mode.
+                  </li>
+                </ul>
+              </div>
+            </details>
+          )}
+
+          {appState.mode === 'subscription' && (
+            <div className='basis-full mb-12'>
+              <div className='grid grid-cols-1 md:grid-cols-2 gap-4 stack-inputs'>
+                <div className='relative'>
+                  <label className='block text-sm font-medium mb-2'>Subscription ID</label>
+                  <input
+                    type='text'
+                    value={subscriptionId}
+                    onChange={(e) => setSubscriptionId(e.target.value)}
+                    className='w-full px-3 py-2 border border-gray-300 rounded-md'
+                    placeholder='Enter subscription ID'
+                  />
+                  <p id='subscription-id-error' className='error absolute bg-(--red) text-white px-2 py-[0.25rem] rounded-lg bottom-10 left-[100px] text-xs'>
+                    {subscriptionIdErrorText}
+                  </p>
+                </div>
+                <div className='relative'>
+                  <label className='block text-sm font-medium mb-2'>Subscription API Key</label>
+                  <input
+                    type='password'
+                    value={subscriptionApiKey}
+                    onChange={(e) => setSubscriptionApiKey(e.target.value)}
+                    className='w-full px-3 py-2 border border-gray-300 rounded-md'
+                    placeholder='Enter subscription API key'
+                  />
+                  <p id='subscription-api-key-error' className='error absolute bg-(--red) text-white px-2 py-[0.25rem] rounded-lg bottom-10 left-[150px] text-xs'>
+                    {subscriptionApiKeyErrorText}
+                  </p>
+                </div>
+              </div>
+              <div className='mt-4 flex justify-end'>
+                <button
+                  onClick={async () => {
+                    if (!subscriptionId || !subscriptionApiKey) return;
+                    
+                    setIsLoadingProjects(true);
+                    
+                    // Clear previous errors
+                    setSubscriptionIdErrorText('');
+                    setSubscriptionApiKeyErrorText('');
+                    
+                    // Hide error elements
+                    const subscriptionIdError = document.getElementById('subscription-id-error') as HTMLElement;
+                    const subscriptionApiKeyError = document.getElementById('subscription-api-key-error') as HTMLElement;
+                    if (subscriptionIdError) subscriptionIdError.style.display = 'none';
+                    if (subscriptionApiKeyError) subscriptionApiKeyError.style.display = 'none';
+                    
+                    try {
+                      const subClient = new SubscriptionApiClient(subscriptionId, subscriptionApiKey);
+                      const res = await subClient.getProjects();
+                      if (res.success && res.data) {
+                        // Build grouped environments by project
+                        const newCreds: EnvironmentCredentials[] = [];
+                        res.data.forEach(p => {
+                          p.environments.forEach(env => {
+                            newCreds.push({
+                              environmentId: env.id,
+                              deliveryApiKey: '',
+                              managementApiKey: '',
+                              subscriptionApiKey: subscriptionApiKey,
+                              subscriptionId: subscriptionId
+                            });
+                          });
+                        });
+                        setEnvironmentCredentials(newCreds);
+                        // Surface project/env grouping in UI by storing names alongside creds
+                        setProjectEnvMap(res.data.reduce((acc: Record<string, { project: string; projectId: string; envName: string }>, p) => {
+                          p.environments.forEach(e => {
+                            acc[e.id] = { project: p.name, projectId: p.id, envName: e.name };
+                          });
+                          return acc;
+                        }, {}));
+                      } else {
+                        console.error('Failed to load projects:', res.error);
+                        // Handle specific error cases - SubscriptionApiClient returns string errors with status codes
+                        if (typeof res.error === 'string') {
+                          if (res.error.includes('400')) {
+                            setSubscriptionIdErrorText('Invalid subscription ID. Please check your subscription ID.');
+                            if (subscriptionIdError) subscriptionIdError.style.display = 'block';
+                          } else if (res.error.includes('401')) {
+                            setSubscriptionApiKeyErrorText('Invalid API key. Please check your subscription API key.');
+                            if (subscriptionApiKeyError) subscriptionApiKeyError.style.display = 'block';
+                          } else {
+                            setSubscriptionIdErrorText('Failed to load projects. Please check your credentials.');
+                            if (subscriptionIdError) subscriptionIdError.style.display = 'block';
+                          }
+                        } else if (res.error && typeof res.error === 'object') {
+                          const errorCode = (res.error as any).status || (res.error as any).code;
+                          if (errorCode === 400) {
+                            setSubscriptionIdErrorText('Invalid subscription ID. Please check your subscription ID.');
+                            if (subscriptionIdError) subscriptionIdError.style.display = 'block';
+                          } else if (errorCode === 401) {
+                            setSubscriptionApiKeyErrorText('Invalid API key. Please check your subscription API key.');
+                            if (subscriptionApiKeyError) subscriptionApiKeyError.style.display = 'block';
+                          } else {
+                            setSubscriptionIdErrorText('Failed to load projects. Please check your credentials.');
+                            if (subscriptionIdError) subscriptionIdError.style.display = 'block';
+                          }
+                        } else {
+                          setSubscriptionIdErrorText('Failed to load projects. Please check your credentials.');
+                          if (subscriptionIdError) subscriptionIdError.style.display = 'block';
+                        }
+                      }
+                    } catch (e: any) {
+                      console.error('Error loading projects:', e);
+                      // Handle network or other errors
+                      if (e?.response?.status === 400) {
+                        setSubscriptionIdErrorText('Invalid subscription ID. Please check your subscription ID.');
+                        if (subscriptionIdError) subscriptionIdError.style.display = 'block';
+                      } else if (e?.response?.status === 401) {
+                        setSubscriptionApiKeyErrorText('Invalid API key. Please check your subscription API key.');
+                        if (subscriptionApiKeyError) subscriptionApiKeyError.style.display = 'block';
+                      } else {
+                        setSubscriptionIdErrorText('Failed to load projects. Please check your credentials.');
+                        if (subscriptionIdError) subscriptionIdError.style.display = 'block';
+                      }
+                    } finally {
+                      setIsLoadingProjects(false);
+                    }
+                  }}
+                  disabled={isLoadingProjects}
+                  className='btn continue-btn'
+                >
+                  {isLoadingProjects ? 'Loading Projects & Environments...' : 'Load Projects & Environments'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {(appState.mode === 'single' || (appState.mode === 'subscription' && Object.keys(projectEnvMap).length > 0)) && (
+            <div className='basis-full mb-6'>
+              <div className='flex justify-between items-center mb-2'>
+                <h3 className='text-lg font-semibold'>
+                  {appState.mode === 'subscription' ? 'Projects & environments' : 'Environments'}
+                </h3>
+              </div>
+
+
+            {/* Group by project name if available */}
+            {appState.mode === 'subscription' && Object.keys(projectEnvMap).length > 0 ? (
+              // Group environments by project in Subscription Analysis mode
+              (() => {
+                const projectGroups: Record<string, { creds: EnvironmentCredentials[], indices: number[], projectName: string }> = {};
+                
+                environmentCredentials.forEach((cred, index) => {
+                  const projectId = projectEnvMap[cred.environmentId]?.projectId || 'unknown';
+                  const projectName = projectEnvMap[cred.environmentId]?.project || 'Unknown Project';
+                  if (!projectGroups[projectId]) {
+                    projectGroups[projectId] = { creds: [], indices: [], projectName };
+                  }
+                  projectGroups[projectId].creds.push(cred);
+                  projectGroups[projectId].indices.push(index);
+                });
+
+                return Object.entries(projectGroups)
+                  .sort(([, a], [, b]) => a.projectName.localeCompare(b.projectName))
+                  .map(([projectId, { creds, indices, projectName }]) => (
+                <details key={projectId} className='mb-6' open>
+                  <summary className='text-lg font-bold text-gray-800 cursor-pointer bg-[rgb(243,243,243)] environment-summary'>
+                    {projectName} ({creds.length} environment{creds.length !== 1 ? 's' : ''})
+                  </summary>
+                    <div className='rounded-b-lg px-4 pb-4 pt-2 bg-[rgb(243,243,243)]'>
+                      {creds.map((cred, groupIndex) => {
+                        const originalIndex = indices[groupIndex];
+                        return (
+                          <div key={originalIndex} className='border border-gray-200 rounded-lg p-4 mb-4 bg-white'>
+                            <div className='flex justify-between items-center mb-4'>
+                              <h4 className='text-base font-bold text-gray-800'>
+                                {projectEnvMap[cred.environmentId]?.envName} ({cred.environmentId})
+                              </h4>
+                              {environmentCredentials.length > 1 && (
+                                <button
+                                  onClick={() => removeEnvironmentCredential(originalIndex)}
+                                  className='btn'
+                                  style={{ 
+                                    backgroundColor: 'var(--red)', 
+                                    color: 'white',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center'
+                                  }}
+                                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--darker-red)'}
+                                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'var(--red)'}
+                                >
+                                  <svg 
+                                    xmlns="http://www.w3.org/2000/svg" 
+                                    fill="none" 
+                                    viewBox="0 0 24 24" 
+                                    strokeWidth={1.5} 
+                                    stroke="currentColor" 
+                                    style={{ width: '20px', height: '20px', marginRight: '8px' }}
+                                  >
+                                    <path 
+                                      strokeLinecap="round" 
+                                      strokeLinejoin="round" 
+                                      d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" 
+                                    />
+                                  </svg>
+                                  Delete
+                                </button>
+                              )}
+                            </div>
+                            <hr className='assets-divider within-container mb-6' />
+                            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 stack-inputs'>
+                              <div>
+                                <label className='block text-sm font-medium mb-2'>Environment ID</label>
+                                <input
+                                  type='text'
+                                  value={cred.environmentId}
+                                  onChange={(e) => updateEnvironmentCredential(originalIndex, 'environmentId', e.target.value)}
+                                  className='w-full px-3 py-2 border border-gray-300 rounded-md'
+                                  placeholder='Environment ID'
+                                />
+                              </div>
+                              <div className='relative'>
+                                <label className='block text-sm font-medium mb-2'>
+                                  Delivery API Key
+                                </label>
+                                <input
+                                  type='password'
+                                  value={cred.deliveryApiKey || ''}
+                                  onChange={(e) => updateEnvironmentCredential(originalIndex, 'deliveryApiKey', e.target.value)}
+                                  className='w-full px-3 py-2 border border-gray-300 rounded-md'
+                                  placeholder='Delivery API key'
+                                />
+                                <p id={`api-key-error-env-${originalIndex}-delivery`} className='error absolute bg-(--red) text-white px-2 py-[0.25rem] rounded-lg bottom-10.5 left-[100px] text-xs'>
+                                  {apiKeyValidationErrors[`env-${originalIndex}-delivery`]}
+                                </p>
+                              </div>
+                              <div className='relative'>
+                                <label className='block text-sm font-medium mb-2'>
+                                  Management API Key
+                                </label>
+                                <input
+                                  type='password'
+                                  value={cred.managementApiKey || ''}
+                                  onChange={(e) => updateEnvironmentCredential(originalIndex, 'managementApiKey', e.target.value)}
+                                  className='w-full px-3 py-2 border border-gray-300 rounded-md'
+                                  placeholder='Management API key (optional)'
+                                />
+                                <p id={`api-key-error-env-${originalIndex}-management`} className='error absolute bg-(--red) text-white px-2 py-[0.25rem] rounded-lg bottom-10 left-[130px] text-xs'>
+                                  {apiKeyValidationErrors[`env-${originalIndex}-management`]}
+                                </p>
+                              </div>
+                            </div>
+                            <div className='mt-4'>
+                              <button
+                                type='button'
+                                onClick={() => applyKeysToSameProject(originalIndex)}
+                                className='btn btn-compact'
+                              >
+                                Add keys to all environments in this project
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </details>
+                ));
+              })()
+            ) : (
+              // Single Environment mode - show environments individually with expandable sections
+              environmentCredentials.map((cred, index) => (
+                <details key={index} className='mb-6' open>
+                  <summary className='text-lg font-bold text-gray-800 cursor-pointer bg-[rgb(243,243,243)] environment-summary'>
+                    <div className='flex justify-between items-center'>
+                      <span>Environment {index + 1}</span>
+                      {environmentCredentials.length > 1 && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            removeEnvironmentCredential(index);
+                          }}
+                          className='btn'
+                          style={{ 
+                            backgroundColor: 'var(--red)', 
+                            color: 'white',
+                            border: 'none',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--darker-red)'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'var(--red)'}
+                        >
+                          <svg 
+                            xmlns="http://www.w3.org/2000/svg" 
+                            fill="none" 
+                            viewBox="0 0 24 24" 
+                            strokeWidth={1.5} 
+                            stroke="currentColor" 
+                            style={{ width: '20px', height: '20px', marginRight: '8px' }}
+                          >
+                            <path 
+                              strokeLinecap="round" 
+                              strokeLinejoin="round" 
+                              d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" 
+                            />
+                          </svg>
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </summary>
+                  <div className='rounded-b-lg px-6 pb-6 pt-4 bg-white border-l border-r border-b border-gray-200'>
+                    <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 stack-inputs'>
+                      <div>
+                        <label className='block text-sm font-medium mb-2'>Environment ID</label>
+                        <input
+                          type='text'
+                          value={cred.environmentId}
+                          onChange={(e) => updateEnvironmentCredential(index, 'environmentId', e.target.value)}
+                          className='w-full px-3 py-2 border border-gray-300 rounded-md'
+                          placeholder='Environment ID'
+                        />
+                      </div>
+                      <div className='relative'>
+                        <label className='block text-sm font-medium mb-2'>
+                          Delivery API Key
+                        </label>
+                        <input
+                          type='password'
+                          value={cred.deliveryApiKey || ''}
+                          onChange={(e) => updateEnvironmentCredential(index, 'deliveryApiKey', e.target.value)}
+                          className='w-full px-3 py-2 border border-gray-300 rounded-md'
+                          placeholder='Delivery API key'
+                        />
+                        <p id={`api-key-error-env-${index}-delivery`} className='error absolute bg-(--red) text-white px-2 py-[0.25rem] rounded-lg bottom-10.5 left-[100px] text-xs'>
+                          {apiKeyValidationErrors[`env-${index}-delivery`]}
+                        </p>
+                      </div>
+                      <div className='relative'>
+                        <label className='block text-sm font-medium mb-2'>
+                          Management API Key
+                        </label>
+                        <input
+                          type='password'
+                          value={cred.managementApiKey || ''}
+                          onChange={(e) => updateEnvironmentCredential(index, 'managementApiKey', e.target.value)}
+                          className='w-full px-3 py-2 border border-gray-300 rounded-md'
+                          placeholder='Management API key (optional)'
+                        />
+                        <p id={`api-key-error-env-${index}-management`} className='error absolute bg-(--red) text-white px-2 py-[0.25rem] rounded-lg bottom-10 left-[130px] text-xs'>
+                          {apiKeyValidationErrors[`env-${index}-management`]}
+                        </p>
+                      </div>
+                      <div>
+                        <label className='block text-sm font-medium mb-2'>
+                          Subscription ID
+                        </label>
+                        <input
+                          type='text'
+                          value={cred.subscriptionId || ''}
+                          onChange={(e) => updateEnvironmentCredential(index, 'subscriptionId', e.target.value)}
+                          className='w-full px-3 py-2 border border-gray-300 rounded-md'
+                          placeholder='Subscription ID (required for Subscription API)'
+                        />
+                      </div>
+                      <div className='relative'>
+                        <label className='block text-sm font-medium mb-2'>
+                          Subscription API Key
+                        </label>
+                        <input
+                          type='password'
+                          value={cred.subscriptionApiKey || ''}
+                          onChange={(e) => updateEnvironmentCredential(index, 'subscriptionApiKey', e.target.value)}
+                          className='w-full px-3 py-2 border border-gray-300 rounded-md'
+                          placeholder='Subscription API key (optional)'
+                        />
+                        <p id={`api-key-error-env-${index}-subscription`} className='error absolute bg-(--red) text-white px-2 py-[0.25rem] rounded-lg bottom-10 left-[150px] text-xs'>
+                          {apiKeyValidationErrors[`env-${index}-subscription`]}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+              ))
+            )}
+
+            {appState.mode === 'single' && (
+              <div 
+                onClick={addEnvironmentCredential}
+                className='rounded-lg p-4 mb-6 cursor-pointer transition-colors duration-200'
+                style={{ backgroundColor: 'rgb(243, 243, 243)' }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgb(230, 230, 230)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgb(243, 243, 243)'; }}
+              >
+                <div className='flex items-center justify-start py-8'>
+                  <div className='flex items-center gap-2 text-gray-500 hover:text-gray-700'>
+                    <svg 
+                      xmlns="http://www.w3.org/2000/svg" 
+                      fill="none" 
+                      viewBox="0 0 24 24" 
+                      strokeWidth={1.5} 
+                      stroke="currentColor" 
+                      className="w-6 h-6"
+                    >
+                      <path 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round" 
+                        d="M12 4.5v15m7.5-7.5h-15" 
+                      />
+                    </svg>
+                    <span className='text-lg font-medium'>Add environment</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {validationErrors.length > 0 && (
+              <div className='mt-6 p-4 bg-red-50 border border-red-200 rounded-lg'>
+                <h4 className='text-sm font-semibold text-red-800 mb-2'>Please fix the following issues:</h4>
+                <ul className='text-sm text-red-700 space-y-1'>
+                  {validationErrors.map((error, index) => (
+                    <li key={index}>• {error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className='flex justify-end mt-12'>
+              <button
+                onClick={collectUsageData}
+                disabled={isCollectingData || environmentCredentials.length === 0 || !isFormValid()}
+                className='btn continue-btn'
+              >
+                {isCollectingData ? 'Collecting Data...' : 'Collect Usage Data'}
+              </button>
+            </div>
+            </div>
+          )}
+          {/* Always-visible back button for credentials step (both modes) */}
+          <div className='flex justify-start mt-12 form-actions'>
+            <button
+              onClick={() => setAppState(prev => ({ ...prev, ui: { ...prev.ui, currentStep: 'mode-selection' } }))}
+              className='btn back-btn'
+            >
+              Change analysis mode
+            </button>
+          </div>
+        </div>
+      )}
+
+      {appState.ui.currentStep === 'data-collection' && (
+        <div className='basis-full flex flex-wrap place-content-start'>
+          <div className='basis-full mb-6'>
+            <h2 className='text-xl font-bold mb-4 text-left'>Collecting Usage Data</h2>
+            <p className='text-gray-600 mb-6 text-left'>Please wait while we collect data from your environments...</p>
+          </div>
+
+          <div className='basis-full'>
+            {Object.entries(collectionProgress).map(([envId, status]) => (
+              <div key={envId} className='border border-gray-200 rounded-lg p-4 mb-4'>
+                <div className='flex justify-between items-center'>
+                  <span className='font-medium'>{envId}</span>
+                  <span className={`px-3 py-1 rounded-full text-sm ${
+                    status === 'Completed' 
+                      ? 'bg-green-100 text-green-800' 
+                      : status.startsWith('Error')
+                      ? 'bg-red-100 text-red-800'
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {status}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {appState.ui.currentStep === 'results' && (
+        <div className='basis-full flex flex-wrap place-content-start'>
+          <div className='basis-full mb-6'>
+            <div className='flex justify-between items-center'>
+              <h2 className='text-xl font-bold'>Usage results</h2>
+              <div className='flex gap-2'>
+                <button
+                  onClick={() => exportUsageReport('excel')}
+                  className='btn continue-btn'
+                >
+                  Export Excel
+                </button>
+                <button
+                  onClick={() => exportUsageReport('json')}
+                  className='btn continue-btn'
+                >
+                  Export JSON
+                </button>
+                <button
+                  onClick={() => exportUsageReport('csv')}
+                  className='btn continue-btn'
+                >
+                  Export CSV
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className='basis-full'>
+            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8'>
+              {appState.data.environments.map((env) => (
+                <div key={env.environmentId} className='border border-gray-200 rounded-lg p-6'>
+                  <h3 className='text-sm font-medium text-gray-600'>Environment ID</h3>
+                  <div className='font-mono font-bold text-sm mt-1 mb-4 break-all'>{env.environmentId}</div>
+                  <div className='space-y-2'>
+                    <div className='flex justify-between'>
+                      <span className='text-gray-600'>Content Items:</span>
+                      <span className='font-medium'>
+                        {formatMetricValue(env.metrics.contentItems, 'Delivery API key', env.apiKeysAvailable.delivery)}
+                      </span>
+                    </div>
+                    <div className='flex justify-between'>
+                      <span className='text-gray-600'>Content Types:</span>
+                      <span className='font-medium'>
+                        {formatMetricValue(env.metrics.contentTypes, 'Delivery API key', env.apiKeysAvailable.delivery)}
+                      </span>
+                    </div>
+                    <div className='flex justify-between'>
+                      <span className='text-gray-600'>Active Languages:</span>
+                      <span className='font-medium'>
+                        {formatMetricValue(env.metrics.languages, 'Delivery API key', env.apiKeysAvailable.delivery)}
+                      </span>
+                    </div>
+                    <div className='flex justify-between'>
+                      <span className='text-gray-600'>Assets:</span>
+                      <span className='font-medium'>
+                        {formatMetricValue(env.metrics.assetCount, 'Management API key', env.apiKeysAvailable.management)}
+                      </span>
+                    </div>
+                    <div className='flex justify-between'>
+                      <span className='text-gray-600'>Asset storage:</span>
+                      <span className='font-medium'>
+                        {env.apiKeysAvailable.management ? (
+                          `${Math.round(env.metrics.assetStorageSize / 1024 / 1024 * 100) / 100} MB`
+                        ) : (
+                          <span 
+                            className="text-gray-400 italic cursor-help" 
+                            title="Requires Management API key"
+                          >
+                            Unavailable
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className='flex justify-between'>
+                      <span className='text-gray-600'>Collections:</span>
+                      <span className='font-medium'>
+                        {formatMetricValue(env.metrics.collections, 'Management API key', env.apiKeysAvailable.management)}
+                      </span>
+                    </div>
+                    <div className='flex justify-between'>
+                      <span className='text-gray-600'>Custom Roles:</span>
+                      <span className='font-medium'>
+                        {formatMetricValue(env.metrics.customRoles, 'Management API key', env.apiKeysAvailable.management)}
+                      </span>
+                    </div>
+                    <div className='flex justify-between'>
+                      <span className='text-gray-600'>Spaces:</span>
+                      <span className='font-medium'>
+                        {formatMetricValue(env.metrics.spaces, 'Management API key', env.apiKeysAvailable.management)}
+                      </span>
+                    </div>
+                    <div className='flex justify-between'>
+                      <span className='text-gray-600'>Active Users:</span>
+                      <span className='font-medium'>
+                        {formatMetricValue(env.metrics.activeUsers, 'Subscription API key', env.apiKeysAvailable.subscription)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className='flex justify-start'>
+              <button
+                onClick={() => setAppState(prev => ({ ...prev, ui: { ...prev.ui, currentStep: 'mode-selection' } }))}
+                className='btn back-btn'
+              >
+                Start New Analysis
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Legacy Asset Description Auditor UI */}
+      {appState.ui.currentStep !== 'mode-selection' && 
+       appState.ui.currentStep !== 'credentials' && 
+       appState.ui.currentStep !== 'data-collection' && 
+       appState.ui.currentStep !== 'results' && (
     <div>
       <div id='loading-container' className='basis-full fixed bg-white z-10 top-0 bottom-0 left-0 right-0 flex place-items-center'>
         <div className='basis-full flex flex-wrap'>
@@ -1472,6 +2569,7 @@ function App() {
           </>
         )}
     </div>
+      )}
     </>
   )
 }

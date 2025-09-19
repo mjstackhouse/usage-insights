@@ -1,5 +1,5 @@
 {
-  "name": "asset-empty-description-finder",
+  "name": "kontent-usage-insights",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -12,10 +12,12 @@
   "dependencies": {
     "@kontent-ai/custom-app-sdk": "^1.0.0",
     "@kontent-ai/management-sdk": "^7.9.1",
+    "@kontent-ai/delivery-sdk": "^16.3.0",
     "@tailwindcss/vite": "^4.1.10",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-select": "^5.10.1",
+    "recharts": "^2.12.7",
     "tailwindcss": "^4.1.10",
     "xlsx": "^0.18.5"
   },
