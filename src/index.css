@@ -38,6 +38,21 @@ html {
   padding: 0 22px;
 }
 
+.btn:focus-visible {
+  outline: none;
+}
+
+button:focus-visible, a:focus-visible {
+  outline: none;
+}
+
+/* Only show orange focus ring on buttons when using keyboard navigation */
+body.using-keyboard .btn:focus-visible,
+body.using-keyboard button:focus-visible,
+body.using-keyboard a:focus-visible {
+  box-shadow: 0 0 0 2px white, 0 0 0 4px rgb(250, 74, 25);
+}
+
 button, a {
   user-select: none;
 }
@@ -48,6 +63,7 @@ button, a {
   border-width: 2px;
   background-color: white;
   color: var(--lighter-black);
+  font-weight: normal;
 }
 
 .back-btn:hover {
@@ -63,6 +79,7 @@ button, a {
 .continue-btn:disabled, .continue-btn:disabled:hover {
   color: rgb(226 232 240);
   background-color: rgb(100 116 139);
+  cursor: not-allowed;
 }
 
 .continue-btn:hover, .continue-btn:hover:enabled {
@@ -83,6 +100,17 @@ input, .show-only-checkbox-label {
   display: none;
 }
 
+.error-icon {
+  font-size: 16px;
+  line-height: 1;
+  display: inline-flex;
+}
+
+.message-icon-section {
+  border-top-left-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+
 #loading-container {
   display: none;
 }
@@ -92,16 +120,30 @@ input[type="text"], input[type="date"], input[type="number"], input[type="passwo
   border: 1px solid var(--color-gray-400);
   border-radius: 9999px;
   padding: 0.25rem 0.5rem;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.2s;
 }
 
 input[type="text"]:hover, input[type="date"]:hover, input[type="number"]:hover, input[type="password"]:hover, select:hover {
   border-color: var(--lighter-black);
 }
 
+input[type="text"], input[type="date"], input[type="number"], input[type="password"], select {
+  box-shadow: none;
+}
+
 input[type="text"]:focus, input[type="date"]:focus, input[type="number"]:focus, input[type="password"]:focus, select:focus {
   border-color: var(--lighter-black);
   outline: none;
+  box-shadow: none;
+}
+
+/* Only show orange focus ring when using keyboard navigation */
+body.using-keyboard input[type="text"]:focus,
+body.using-keyboard input[type="date"]:focus,
+body.using-keyboard input[type="number"]:focus,
+body.using-keyboard input[type="password"]:focus,
+body.using-keyboard select:focus {
+  box-shadow: 0 0 0 2px white, 0 0 0 4px rgb(250, 74, 25);
 }
 
 .tooltip-icon, .tooltip-icon-small {
@@ -111,11 +153,19 @@ input[type="text"]:focus, input[type="date"]:focus, input[type="number"]:focus, 
 .tooltip-icon {
   width: 24px;
   padding: 3px 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .tooltip-icon-small {
   width: 20px;
   padding: 1px 2.25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .tooltip-icon:hover {
@@ -295,18 +345,13 @@ th, td {
 }
 
 #app-title {
-  background: black;
-  font-weight: 700;
+  font-kerning: auto;
+  letter-spacing: .825852px;
   text-transform: uppercase;
-  font-stretch: 100%;
-  font-kerning: auto;
-  line-height: 18px;
-  box-sizing: border-box;
-  font-stretch: 100%;
-  font-kerning: auto;
-  font-size: 12px !important;
-  line-height: 18px;
-  letter-spacing: 0.825852px;
-  text-decoration: none;
   background: linear-gradient(to right, var(--darker-purple), var(--orange) 75%);
+  font-weight: 700;
+  font-stretch: 100%;
+  line-height: 18px;
+  text-decoration: none;
+  font-size: 12px !important;
 }

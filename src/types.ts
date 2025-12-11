@@ -60,7 +60,7 @@ export interface SubscriptionData {
 }
 
 export interface AppState {
-  mode: 'single' | 'subscription';
+  mode: 'individual' | 'all';
   credentials: {
     subscription?: SubscriptionCredentials;
     environments: EnvironmentCredentials[];

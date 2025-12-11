@@ -1,7 +1,7 @@
 #root {
   max-width: 100%;
   max-height: 100%;
-  padding: 6rem 3rem 3rem 3rem;
+  padding: 72px 36px 36px 36px;
   text-align: left;
   overflow-y: auto;
   position: relative;
@@ -455,6 +455,11 @@ details > summary {
   cursor: pointer;
   user-select: none;
   border-radius: 8px; /* rounded when collapsed */
+}
+
+details > summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px white, 0 0 0 4px rgb(250, 74, 25);
 }
 
 details > summary * {

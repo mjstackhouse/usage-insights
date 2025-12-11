@@ -47,10 +47,10 @@ export class KontentApiClient {
       // If basic access fails, this is an environment access issue
       if (error instanceof DeliveryError) {
         console.log('Environment access test failed:', { errorCode: error.errorCode, specificCode: error.specificCode, message: error.message });
-        return { hasAccess: false, errorMessage: 'Please provide a Delivery API key with access to this environment.' };
+        return { hasAccess: false, errorMessage: 'Invalid Delivery Preview API key. Please verify your key and try again.' };
       }
       console.warn('Unexpected error testing environment access:', error);
-      return { hasAccess: false, errorMessage: 'Failed to test Delivery API key access.' };
+      return { hasAccess: false, errorMessage: 'Invalid Delivery Preview API key. Please verify your key and try again.' };
     }
 
     // If basic access works, now test Content Preview permission
@@ -83,10 +83,10 @@ export class KontentApiClient {
       // If we get here, basic access works but preview doesn't - this is a Content Preview permission issue
       if (error instanceof DeliveryError) {
         console.log('Content Preview test failed (but environment access works):', { errorCode: error.errorCode, specificCode: error.specificCode, message: error.message });
-        return { hasAccess: false, errorMessage: "Please provide a Delivery API key with 'Content preview' selected." };
+        return { hasAccess: false, errorMessage: "Invalid Delivery Preview API key. Please provide a key with 'Content preview' selected and try again." };
       }
       console.warn('Unexpected error testing Content Preview access:', error);
-      return { hasAccess: false, errorMessage: 'Failed to test Delivery API key access.' };
+      return { hasAccess: false, errorMessage: 'Invalid Delivery Preview API key. Please verify your key and try again.' };
     }
   }
 
@@ -179,7 +179,7 @@ export class KontentApiClient {
       if (!previewAccessResult.hasAccess) {
         return {
           success: false,
-          error: previewAccessResult.errorMessage || 'Delivery API key requires Content Preview permission to count all content items. Please provide a Delivery API key with Content Preview permission enabled.'
+          error: previewAccessResult.errorMessage || "Invalid Delivery Preview API key. Please provide a key with 'Content Preview' enabled and try again."
         };
       }
 
@@ -310,10 +310,8 @@ export class KontentApiClient {
       metrics.assetCount = assetsResponse.data.items.length;
       let assetSizeTotal = 0;
       for (const asset of assetsResponse.data.items) {
-        console.log(`${asset.fileName}`, asset.size);
         assetSizeTotal+=asset.size || 0;
       }
-      console.log('assetSizeTotal: ', assetSizeTotal);
       metrics.assetStorageSize = assetsResponse.data.items.reduce((total, asset) => total + (asset.size || 0), 0);
 
       // Get collections
@@ -428,7 +426,7 @@ export class KontentApiClient {
       if (!previewAccessResult.hasAccess) {
         return {
           success: false,
-          error: previewAccessResult.errorMessage || "Please provide a Delivery API key with 'Content preview' selected."
+          error: previewAccessResult.errorMessage || "Invalid Delivery Preview API key. Please provide a key with 'Content preview' selected and try again."
         };
       }
       return { success: true, data: true };
@@ -436,7 +434,7 @@ export class KontentApiClient {
       console.error('Error testing Delivery API key:', error);
       
       // Extract specific error message from Delivery SDK
-      let errorMessage = 'Failed to test Delivery API key';
+      let errorMessage = 'Invalid Delivery Preview API key. Please verify your key and try again.';
       
       if (error?.message) {
         errorMessage = error.message;
@@ -469,7 +467,7 @@ export class KontentApiClient {
       
       return {
         success: false,
-        error: 'Invalid Management API key. Please check your API key.'
+        error: 'Invalid Management API key. Please verify your key and try again.'
       };
     }
   }
@@ -655,26 +653,26 @@ export class SubscriptionApiClient {
       
       // Extract status code from Management SDK error
       let statusCode = 0;
-      let errorMessage = 'Failed to list projects';
+      let errorMessage = 'Failed to load projects. Please verify your credentials and try again.';
       
       // Check for specific error messages first (most reliable for Management SDK)
       if (error?.message === 'Missing or invalid API key. Please include a valid API key in the Authorization header, using the following format: \'Authorization: Bearer <YOUR_API_KEY>\'.') {
         statusCode = 401;
-        errorMessage = 'Invalid API key. Please check your subscription API key.';
+        errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
       } else if (error?.response?.status) {
         statusCode = error.response.status;
         switch (statusCode) {
           case 400:
-            errorMessage = 'Invalid subscription ID. Please check your subscription ID.';
+            errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
             break;
           case 401:
-            errorMessage = 'Invalid API key. Please check your subscription API key.';
+            errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
             break;
           case 403:
-            errorMessage = 'Insufficient permissions. Please check your API key permissions.';
+            errorMessage = 'Insufficient permissions. Please verify your API key permissions and try again.';
             break;
           case 404:
-            errorMessage = 'Subscription not found. Please check your subscription ID.';
+            errorMessage = 'Subscription not found. Please verify your subscription ID and try again.';
             break;
           default:
             errorMessage = `Subscription API error ${statusCode}: ${error.message || error.response.statusText}`;
@@ -683,16 +681,16 @@ export class SubscriptionApiClient {
         statusCode = error.status;
         switch (statusCode) {
           case 400:
-            errorMessage = 'Invalid subscription ID. Please check your subscription ID.';
+            errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
             break;
           case 401:
-            errorMessage = 'Invalid API key. Please check your subscription API key.';
+            errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
             break;
           case 403:
-            errorMessage = 'Insufficient permissions. Please check your API key permissions.';
+            errorMessage = 'Insufficient permissions. Please verify your API key permissions and try again.';
             break;
           case 404:
-            errorMessage = 'Subscription not found. Please check your subscription ID.';
+            errorMessage = 'Subscription not found. Please verify your subscription ID and try again.';
             break;
           default:
             errorMessage = `Subscription API error ${statusCode}: ${error.message}`;
@@ -700,9 +698,9 @@ export class SubscriptionApiClient {
       } else if (error?.code === 'ERR_NETWORK' && error?.message === 'Network Error') {
         // Fallback for Network Error (likely 400)
         statusCode = 400;
-        errorMessage = 'Invalid subscription ID. Please check your subscription ID.';
+        errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
       } else {
-        errorMessage = error instanceof Error ? error.message : 'Failed to list projects';
+        errorMessage = error instanceof Error ? error.message : 'Failed to load projects. Please verify your credentials and try again.';
       }
 
       return { 
@@ -742,26 +740,26 @@ export class SubscriptionApiClient {
       
       // Extract status code from Management SDK error
       let statusCode = 0;
-      let errorMessage = 'Failed to list users';
+      let errorMessage = 'Failed to load users. Please verify your credentials and try again.';
       
       // Check for specific error messages first (most reliable for Management SDK)
       if (error?.message === 'Missing or invalid API key. Please include a valid API key in the Authorization header, using the following format: \'Authorization: Bearer <YOUR_API_KEY>\'.') {
         statusCode = 401;
-        errorMessage = 'Invalid API key. Please check your subscription API key.';
+        errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
       } else if (error?.response?.status) {
         statusCode = error.response.status;
         switch (statusCode) {
           case 400:
-            errorMessage = 'Invalid subscription ID. Please check your subscription ID.';
+            errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
             break;
           case 401:
-            errorMessage = 'Invalid API key. Please check your subscription API key.';
+            errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
             break;
           case 403:
-            errorMessage = 'Insufficient permissions. Please check your API key permissions.';
+            errorMessage = 'Insufficient permissions. Please verify your API key permissions and try again.';
             break;
           case 404:
-            errorMessage = 'Subscription not found. Please check your subscription ID.';
+            errorMessage = 'Subscription not found. Please verify your subscription ID and try again.';
             break;
           default:
             errorMessage = `Subscription API error ${statusCode}: ${error.message || error.response.statusText}`;
@@ -770,16 +768,16 @@ export class SubscriptionApiClient {
         statusCode = error.status;
         switch (statusCode) {
           case 400:
-            errorMessage = 'Invalid subscription ID. Please check your subscription ID.';
+            errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
             break;
           case 401:
-            errorMessage = 'Invalid API key. Please check your subscription API key.';
+            errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
             break;
           case 403:
-            errorMessage = 'Insufficient permissions. Please check your API key permissions.';
+            errorMessage = 'Insufficient permissions. Please verify your API key permissions and try again.';
             break;
           case 404:
-            errorMessage = 'Subscription not found. Please check your subscription ID.';
+            errorMessage = 'Subscription not found. Please verify your subscription ID and try again.';
             break;
           default:
             errorMessage = `Subscription API error ${statusCode}: ${error.message}`;
@@ -787,9 +785,9 @@ export class SubscriptionApiClient {
       } else if (error?.code === 'ERR_NETWORK' && error?.message === 'Network Error') {
         // Fallback for Network Error (likely 400)
         statusCode = 400;
-        errorMessage = 'Invalid subscription ID. Please check your subscription ID.';
+        errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
       } else {
-        errorMessage = error instanceof Error ? error.message : 'Failed to list users';
+        errorMessage = error instanceof Error ? error.message : 'Failed to load users. Please verify your credentials and try again.';
       }
 
       return { 
@@ -817,26 +815,26 @@ export class SubscriptionApiClient {
     } catch (error: any) {
       // Extract status code from Management SDK error
       let statusCode = 0;
-      let errorMessage = 'Failed to test Subscription API key';
+      let errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
       
       // Check for specific error messages first (most reliable for Management SDK)
       if (error?.message === 'Missing or invalid API key. Please include a valid API key in the Authorization header, using the following format: \'Authorization: Bearer <YOUR_API_KEY>\'.') {
         statusCode = 401;
-        errorMessage = 'Invalid Subscription API key. Please check your subscription API key.';
+        errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
       } else if (error?.response?.status) {
         statusCode = error.response.status;
         switch (statusCode) {
           case 400:
-            errorMessage = 'Invalid subscription ID. Please check your subscription ID.';
+            errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
             break;
           case 401:
-            errorMessage = 'Invalid API key. Please check your subscription API key.';
+            errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
             break;
           case 403:
-            errorMessage = 'Insufficient permissions. Please check your API key permissions.';
+            errorMessage = 'Insufficient permissions. Please verify your API key permissions and try again.';
             break;
           case 404:
-            errorMessage = 'Subscription not found. Please check your subscription ID.';
+            errorMessage = 'Subscription not found. Please verify your subscription ID and try again.';
             break;
           default:
             errorMessage = `Subscription API error ${statusCode}: ${error.message || error.response.statusText}`;
@@ -845,16 +843,16 @@ export class SubscriptionApiClient {
         statusCode = error.status;
         switch (statusCode) {
           case 400:
-            errorMessage = 'Invalid subscription ID. Please check your subscription ID.';
+            errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
             break;
           case 401:
-            errorMessage = 'Invalid API key. Please check your subscription API key.';
+            errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
             break;
           case 403:
-            errorMessage = 'Insufficient permissions. Please check your API key permissions.';
+            errorMessage = 'Insufficient permissions. Please verify your API key permissions and try again.';
             break;
           case 404:
-            errorMessage = 'Subscription not found. Please check your subscription ID.';
+            errorMessage = 'Subscription not found. Please verify your subscription ID and try again.';
             break;
           default:
             errorMessage = `Subscription API error ${statusCode}: ${error.message}`;
@@ -862,9 +860,9 @@ export class SubscriptionApiClient {
       } else if (error?.code === 'ERR_NETWORK' && error?.message === 'Network Error') {
         // Fallback for Network Error (likely 400)
         statusCode = 400;
-        errorMessage = 'Invalid subscription ID. Please check your subscription ID.';
+        errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
       } else {
-        errorMessage = error instanceof Error ? error.message : 'Failed to test Subscription API key';
+        errorMessage = error instanceof Error ? error.message : 'Invalid Subscription API key. Please verify your key and try again.';
       }
 
       return { 
