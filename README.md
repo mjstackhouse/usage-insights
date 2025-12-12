@@ -6,11 +6,11 @@ This is a comprehensive tool designed for [Kontent.ai](https://kontent.ai/) user
 
 ### Full Screen Mode
 
-![Full Screen Demo](usage-insights-fullscreen-demo.gif)
+<img src="usage-insights-fullscreen-demo.gif" alt="Full Screen Demo" width="800">
 
 ### Dialog Mode
 
-![Dialog Demo](usage-insights-dialog-demo.gif)
+<img src="usage-insights-dialog-demo.gif" alt="Dialog Demo" width="800">
 
 ## What does it do?
 

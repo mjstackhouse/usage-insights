@@ -1679,7 +1679,7 @@ function App() {
                                   <span 
                                     className='tooltip-icon relative'
                                     style={{ width: '16px', height: '16px', fontSize: '12px', marginLeft: '0.25rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: '1' }}
-                                    title={sdkResponse ? "To find your Management API key, go to Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' permission selected in the 'Permissions' section." : "To find your Management API key, go to Kontent.ai > Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' permission selected in the 'Permissions' section."}
+                                    title={sdkResponse ? "To find your Management API key, go to Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' and 'Read assets' permissions selected in the 'Permissions' section." : "To find your Management API key, go to Kontent.ai > Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' and 'Read assets' permissions selected in the 'Permissions' section."}
                                   >
                                     ⓘ
                                   </span>
@@ -1850,7 +1850,7 @@ function App() {
                           <span 
                             className='tooltip-icon relative'
                             style={{ width: '16px', height: '16px', fontSize: '12px', marginLeft: '0.25rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: '1' }}
-                            title={sdkResponse ? "To find your Management API key, go to Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' permission selected in the 'Permissions' section." : "To find your Management API key, go to Kontent.ai > Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' permission selected in the 'Permissions' section."}
+                            title={sdkResponse ? "To find your Management API key, go to Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' and 'Read assets' permissions selected in the 'Permissions' section." : "To find your Management API key, go to Kontent.ai > Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' and 'Read assets' permissions selected in the 'Permissions' section."}
                           >
                             ⓘ
                           </span>
