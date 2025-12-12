@@ -1,10 +1,19 @@
 #root {
   max-width: 100%;
   max-height: 100%;
-  padding: 72px 36px 36px 36px;
   text-align: left;
   overflow-y: auto;
   position: relative;
+}
+
+/* Full screen mode needs top padding for app-title (42px min-height + 24px padding = ~66px, rounded up) */
+#root:not(.dialog-mode) {
+  padding: 72px 36px 36px 36px !important;
+}
+
+/* Dialog mode - needs top padding for app-title + reduced side padding */
+#root.dialog-mode {
+  padding: 56px 16px 16px 16px !important;
 }
 
 /* Pagination page button hover effect */
@@ -733,4 +742,86 @@ label:has(input[type="checkbox"]):hover, label > input[type="checkbox"]:hover {
 .search-input:focus {
   border-color: var(--lighter-black) !important;
   outline: none !important;
+}
+
+/* Dialog mode - hide back-to-top button */
+.dialog-mode .back-to-top-btn {
+  display: none !important;
+}
+
+/* Dialog mode - force mobile-like vertical layout with primary action on top */
+.dialog-mode .button-container {
+  flex-direction: column-reverse;
+  gap: 12px;
+  width: 100%;
+  margin-top: 16px;
+}
+
+/* Dialog mode - show divider above buttons when needed (before projects loaded in All environments mode) */
+.dialog-mode .button-container.with-divider {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-gray-300);
+}
+
+.dialog-mode .button-container button {
+  width: 100%;
+}
+
+/* Dialog mode - force mode selection cards to stack vertically */
+.dialog-mode .mode-selection-grid {
+  grid-template-columns: 1fr !important;
+  gap: 1rem;
+}
+
+/* Dialog mode - adjust card padding for narrower width */
+.dialog-mode .mode-selection-grid > div {
+  padding: 1rem !important;
+}
+
+/* Dialog mode - reduce font sizes slightly for better fit */
+.dialog-mode h2 {
+  font-size: 1.25rem;
+}
+
+.dialog-mode h3 {
+  font-size: 1rem;
+}
+
+/* Mode card collapsible details styling for Dialog mode */
+.mode-card-details {
+  margin-top: 0;
+}
+
+.mode-card-details > summary {
+  padding: 4px 4px 4px 20px;
+  margin: 0;
+  border-radius: 4px;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  background: transparent !important;
+  text-decoration: none;
+  color: var(--purple);
+}
+
+.mode-card-details > summary:hover {
+  background: transparent !important;
+  text-decoration: underline;
+}
+
+.mode-card-details > summary::before {
+  width: 12px;
+  height: 12px;
+  margin-left: 0;
+  left: 4px;
+}
+
+/* Dialog mode - make Load Projects button full-width like other action buttons */
+.dialog-mode .load-projects-btn-container {
+  justify-content: center;
+}
+
+.dialog-mode .load-projects-btn-container button {
+  width: 100%;
 }

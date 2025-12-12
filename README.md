@@ -2,7 +2,15 @@
 
 This is a comprehensive tool designed for [Kontent.ai](https://kontent.ai/) users who want to analyze their usage metrics across environments and gain insights into their content management patterns. The tool provides detailed usage analytics similar to the official Kontent.ai [usage report](https://kontent.ai/learn/docs/subscriptions-payments/usage-report), but with environment-level granularity. You can try it out [here](https://usage-insights.netlify.app/).
 
-<video src="usage-insights-demo.mp4" autoplay loop muted playsinline></video>
+## Demo
+
+### Full Screen Mode
+
+![Full Screen Demo](usage-insights-fullscreen-demo.gif)
+
+### Dialog Mode
+
+![Dialog Demo](usage-insights-dialog-demo.gif)
 
 ## What does it do?
 
@@ -54,7 +62,7 @@ This tool can be deployed as a [Kontent.ai custom app](https://kontent.ai/learn/
 3. Click **Create new custom app**.
 4. Enter a name for your app and the hosted URL.
 5. Select which roles can access the app.
-6. Select the "Full screen" display mode.
+6. Select the "Full screen" or "Dialog" mode, depending on how you'd like to use it.
 7. Click **Save changes**.
 
 **Usage:**

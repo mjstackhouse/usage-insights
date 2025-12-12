@@ -8,8 +8,6 @@ import type {
 } from './types';
 import { KontentApiClient, SubscriptionApiClient } from './api-clients';
 
-let customAppSDK: any = null;
-
 function App() {
   // Main app state
   const [appState, setAppState] = useState<AppState>({
@@ -30,7 +28,7 @@ function App() {
   // SDK and loading state
   const [loadingText, setLoadingText] = useState<React.ReactNode>('Fetching assets...');
   const [sdkResponse, setSdkResponse] = useState<any>(null);
-  const [sdkLoaded, setSdkLoaded] = useState(false);
+  const [isDialogMode, setIsDialogMode] = useState(false);
 
   // New state for usage insights
   const [subscriptionId, setSubscriptionId] = useState<string>('');
@@ -123,6 +121,18 @@ function App() {
       setExportDropdownWidth(exportButtonRef.current.offsetWidth);
     }
   }, [isExportDropdownOpen]);
+
+  // Apply dialog mode class to root
+  useEffect(() => {
+    const root = document.getElementById('root');
+    if (root) {
+      if (isDialogMode) {
+        root.classList.add('dialog-mode');
+      } else {
+        root.classList.remove('dialog-mode');
+      }
+    }
+  }, [isDialogMode]);
 
   // Handle click outside to close export dropdown
   useEffect(() => {
@@ -864,59 +874,19 @@ function App() {
   };
 
 
-  async function getContext() {
-    let response: any;
-
-    if (customAppSDK !== null) {
-      response = await customAppSDK.getCustomAppContext();
-
-      if (await response.isError) {
-        console.error({ errorCode: response.code, description: response.description});
-        setSdkLoaded(true); // Still mark as loaded even if there's an error
-      } 
-      else {
-        if (response.context.environmentId) {
-          // Auto-add current environment to Individual environments analysis list
-          setEnvironmentCredentials(prev => {
-            const exists = prev.some(c => c.environmentId === response.context.environmentId);
-            if (exists) return prev;
-            if (appState.mode !== 'individual') return prev; // only for Individual environments flow
-            
-            // If we have an empty environment, replace it with the SDK environment
-            if (prev.length === 1 && prev[0].environmentId === '') {
-              return [{
-                environmentId: response.context.environmentId,
-                deliveryApiKey: '',
-                managementApiKey: '',
-                subscriptionApiKey: '',
-                subscriptionId: ''
-              }];
-            }
-            
-            // Otherwise, add a new environment
-            const newCred: EnvironmentCredentials = {
-              environmentId: response.context.environmentId,
-              deliveryApiKey: '',
-              managementApiKey: '',
-              subscriptionApiKey: '',
-              subscriptionId: ''
-            };
-            return [...prev, newCred];
-          });
-        }
-
-        setSdkResponse({...response});
-        setSdkLoaded(true);
-      }
-    } else {
-      // If SDK is not available, still mark as loaded
-      setSdkLoaded(true);
-    }
-  };
 
   useEffect(() => {
-    async function loadSDK() {
+    async function initializeSDK() {
       const loadingContainer = document.getElementById('loading-container') as HTMLElement;
+
+      // DEBUG: Log environment info BEFORE iframe check
+      console.log('App initialization - Environment check:', {
+        isInIframe: window.self !== window.top,
+        windowSelf: window.self,
+        windowTop: window.top,
+        location: window.location.href,
+        parentOrigin: window.parent !== window ? document.referrer : 'N/A'
+      });
 
       if (window.self !== window.top) {
         // Show loading immediately for custom app contexts to prevent flash
@@ -926,13 +896,167 @@ function App() {
         }
         
         try {
-          customAppSDK = await import('@kontent-ai/custom-app-sdk');
-          if (customAppSDK !== null) {
-            await getContext();
+          console.log('Attempting to import SDK...');
+          const SDK = await import('@kontent-ai/custom-app-sdk');
+          console.log('SDK imported successfully:', SDK);
+          console.log('SDK has observeCustomAppContext?', typeof (SDK as any).observeCustomAppContext);
+          console.log('SDK has setPopupSize?', typeof (SDK as any).setPopupSize);
+          
+          // Subscribe to context changes
+          console.log('Calling observeCustomAppContext...');
+          const response = await (SDK as any).observeCustomAppContext(async (context: any) => {
+            // DEBUG: Log the full context to understand what we're working with
+            console.log('🎯 SDK Context callback invoked (context changed)!');
+            console.log('SDK Context received:', {
+              path: context.path,
+              currentPage: context.currentPage,
+              environmentId: context.environmentId
+            });
+            
+            // Re-detect mode on context change by trying setPopupSize
+            try {
+              const popupResult = await (SDK as any).setPopupSize(
+                { unit: 'px', value: 450 },
+                { unit: '%', value: 70 }
+              );
+              
+              if (popupResult.isError) {
+                console.log('Context change: Full-screen mode');
+                setIsDialogMode(false);
+              } else {
+                console.log('Context change: Dialog mode');
+                setIsDialogMode(true);
+              }
+            } catch (err) {
+              console.log('Context change: Full-screen mode (error)');
+              setIsDialogMode(false);
+            }
+            
+            // Handle environment ID from context
+            if (context.environmentId) {
+              setEnvironmentCredentials(prev => {
+                const exists = prev.some(c => c.environmentId === context.environmentId);
+                if (exists) return prev;
+                if (appState.mode !== 'individual') return prev;
+                
+                // If we have an empty environment, replace it with the SDK environment
+                if (prev.length === 1 && prev[0].environmentId === '') {
+                  return [{
+                    environmentId: context.environmentId,
+                    deliveryApiKey: '',
+                    managementApiKey: '',
+                    subscriptionApiKey: '',
+                    subscriptionId: ''
+                  }];
+                }
+                
+                // Otherwise, add a new environment
+                return [...prev, {
+                  environmentId: context.environmentId,
+                  deliveryApiKey: '',
+                  managementApiKey: '',
+                  subscriptionApiKey: '',
+                  subscriptionId: ''
+                }];
+              });
+            }
+          });
+          
+          console.log('observeCustomAppContext response received:', response);
+          console.log('Response type:', typeof response);
+          console.log('Response.isError:', response?.isError);
+          console.log('Response.context:', response?.context);
+          console.log('Response keys:', response ? Object.keys(response) : 'response is null/undefined');
+          
+          if (!response.isError) {
+            console.log('✅ No error, setting SDK response with context:', response.context);
+            setSdkResponse(response.context);
+            
+            // Process initial context immediately (callback is only for changes)
+            const initialContext = response.context;
+            console.log('Processing initial context:', initialContext);
+            
+            // Detect Dialog mode by trying to set popup size
+            // If setPopupSize succeeds = Dialog mode (popup exists)
+            // If setPopupSize fails = Full-screen mode (no popup)
+            console.log('🔍 Attempting to detect mode by calling setPopupSize...');
+            
+            try {
+              const popupResult = await (SDK as any).setPopupSize(
+                { unit: 'px', value: 450 },
+                { unit: '%', value: 70 }
+              );
+              
+              if (popupResult.isError) {
+                // setPopupSize failed = Full-screen mode
+                console.log('❌ setPopupSize failed (Full-screen mode):', popupResult);
+                setIsDialogMode(false);
+              } else {
+                // setPopupSize succeeded = Dialog mode
+                console.log('✅ setPopupSize succeeded (Dialog mode)');
+                setIsDialogMode(true);
+              }
+            } catch (err) {
+              // Error calling setPopupSize = likely Full-screen mode
+              console.log('❌ setPopupSize threw error (Full-screen mode):', err);
+              setIsDialogMode(false);
+            }
+            
+            console.log('Mode detection complete:', {
+              currentPage: initialContext.currentPage,
+              path: initialContext.path
+            });
+            
+            // Handle environment ID from initial context
+            if (initialContext.environmentId) {
+              console.log('Setting environment ID from initial context:', initialContext.environmentId);
+              setEnvironmentCredentials(prev => {
+                const exists = prev.some(c => c.environmentId === initialContext.environmentId);
+                if (exists) {
+                  console.log('Environment already exists in credentials');
+                  return prev;
+                }
+                if (appState.mode !== 'individual') {
+                  console.log('Not in individual mode, skipping environment add');
+                  return prev;
+                }
+                
+                // If we have an empty environment, replace it with the SDK environment
+                if (prev.length === 1 && prev[0].environmentId === '') {
+                  console.log('Replacing empty environment with SDK environment');
+                  return [{
+                    environmentId: initialContext.environmentId,
+                    deliveryApiKey: '',
+                    managementApiKey: '',
+                    subscriptionApiKey: '',
+                    subscriptionId: ''
+                  }];
+                }
+                
+                // Otherwise, add a new environment
+                console.log('Adding new environment from SDK context');
+                return [...prev, {
+                  environmentId: initialContext.environmentId,
+                  deliveryApiKey: '',
+                  managementApiKey: '',
+                  subscriptionApiKey: '',
+                  subscriptionId: ''
+                }];
+              });
+            }
+          } else {
+            console.error('❌ SDK observeCustomAppContext returned error:', { 
+              errorCode: response.code, 
+              description: response.description
+            });
           }
-        }
-        catch (error) {
-          console.error(error);
+        } catch (error) {
+          console.error('SDK initialization error:', error);
+          console.error('Error details:', {
+            name: (error as any)?.name,
+            message: (error as any)?.message,
+            stack: (error as any)?.stack
+          });
         }
         
         // Hide loading when done
@@ -944,14 +1068,13 @@ function App() {
         if (loadingContainer) {
           loadingContainer.style.display = 'none';
         }
-        console.log('Running outside of Kontent.ai, SDK not loaded');
+        console.log('Running outside of Kontent.ai (not in iframe), SDK not loaded');
+        console.log('If you expected SDK to load, the app may not be in an iframe context');
       }
       
-      // Mark SDK as loaded regardless of outcome
-      setSdkLoaded(true);
     }
 
-    loadSDK();
+    initializeSDK();
   }, []);
 
 
@@ -974,12 +1097,12 @@ function App() {
         </div>
       )}
 
-      {showBackToTop && !isCollectingData && (
+      {showBackToTop && !isCollectingData && !isDialogMode && (
         <button
           type='button'
           aria-label='Back to top'
           onClick={handleBackToTop}
-          className='fixed z-20 bottom-36 right-10 btn'
+          className='fixed z-20 bottom-36 right-10 btn back-to-top-btn'
           style={{
             borderRadius: '9999px',
             width: '44px',
@@ -1000,18 +1123,16 @@ function App() {
           </svg>
         </button>
       )}
-      {sdkLoaded && (
-        <p id='app-title' className='fixed top-0 right-0 left-0 py-[12px] pl-[36px] text-left text-white z-40'>
-          Usage Insights
-        </p>
-      )}
+      <p id='app-title' className='text-white'>
+        Usage Insights
+      </p>
 
       {/* New Usage Insights UI */}
       {appState.ui.currentStep === 'mode-selection' && (
         <div className='basis-full flex flex-wrap place-content-start'>
           
           
-          <div className='basis-full grid grid-cols-1 md:grid-cols-2 gap-6'>
+          <div className='basis-full grid grid-cols-1 md:grid-cols-2 gap-6 mode-selection-grid'>
             <div 
               className='rounded-lg p-6 cursor-pointer transition-colors focus-visible:ring-2 focus-visible:ring-[rgb(250,74,25)] focus-visible:ring-offset-2'
               style={{ backgroundColor: 'rgb(243, 243, 243)' }}
@@ -1030,23 +1151,51 @@ function App() {
               }}
             >
               <h3 className='text-lg font-semibold'>Individual environments</h3>
-              <p className='text-gray-600 mb-4'>
+              <p className={`text-gray-600 ${isDialogMode ? 'mb-2' : 'mb-4'}`}>
                 Analyze usage metrics for individually-added environments.
               </p>
-              <div className='text-sm text-gray-500'>
-                <strong>Required:</strong>
-                <ul className='list-disc pl-6 text-sm space-y-1 mt-1'>
-                  <li className='text-gray-700'>Environment ID</li>
-                  <li className='text-gray-700'>
-                    At least one API key:
-                    <ul className='list-[circle] pl-6 text-sm space-y-1 mt-1'>
-                      <li className='text-gray-700'><span className='font-medium'>Delivery Preview</span> API key</li>
-                      <li className='text-gray-700'><span className='font-medium'>Management</span> API key</li>
-                      <li className='text-gray-700'><span className='font-medium'>Subscription</span> API key (requires Subscription ID)</li>
+              {isDialogMode ? (
+                <details 
+                  className='mode-card-details' 
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label='Requirements for Individual environments mode'
+                >
+                  <summary 
+                    className='text-sm font-semibold text-gray-500 cursor-pointer'
+                    aria-label='View requirements for Individual environments mode'
+                  >
+                    Requirements
+                  </summary>
+                  <div className='text-sm text-gray-500 mt-1 pl-4' role='region' aria-label='Individual environments requirements list'>
+                    <ul className='list-disc pl-4 text-sm space-y-1' role='list'>
+                      <li className='text-gray-700'>Environment ID</li>
+                      <li className='text-gray-700'>
+                        At least one API key:
+                        <ul className='list-[circle] pl-4 text-sm space-y-1 mt-1' role='list'>
+                          <li className='text-gray-700'><span className='font-medium'>Delivery Preview</span> API key</li>
+                          <li className='text-gray-700'><span className='font-medium'>Management</span> API key</li>
+                          <li className='text-gray-700'><span className='font-medium'>Subscription</span> API key (requires Subscription ID)</li>
+                        </ul>
+                      </li>
                     </ul>
-                  </li>
-                </ul>
-              </div>
+                  </div>
+                </details>
+              ) : (
+                <div className='text-sm text-gray-500'>
+                  <strong>Required:</strong>
+                  <ul className='list-disc pl-6 text-sm space-y-1 mt-1'>
+                    <li className='text-gray-700'>Environment ID</li>
+                    <li className='text-gray-700'>
+                      At least one API key:
+                      <ul className='list-[circle] pl-6 text-sm space-y-1 mt-1'>
+                        <li className='text-gray-700'><span className='font-medium'>Delivery Preview</span> API key</li>
+                        <li className='text-gray-700'><span className='font-medium'>Management</span> API key</li>
+                        <li className='text-gray-700'><span className='font-medium'>Subscription</span> API key (requires Subscription ID)</li>
+                      </ul>
+                    </li>
+                  </ul>
+                </div>
+              )}
             </div>
             
             <div 
@@ -1067,21 +1216,47 @@ function App() {
               }}
             >
               <h3 className='text-lg font-semibold'>All environments</h3>
-              <p className='text-gray-600 mb-4'>
+              <p className={`text-gray-600 ${isDialogMode ? 'mb-2' : 'mb-4'}`}>
                 Analyze usage metrics across all environments in your subscription.
               </p>
-              <div className='text-sm text-gray-500'>
-                <strong>Required:</strong>
-                <ul className='list-disc pl-6 text-sm space-y-1 mt-1'>
-                  <li className='text-gray-700'>Subscription ID</li>
-                  <li className='text-gray-700'>Subscription API key</li>
-                </ul>
-                <strong className='mt-3 block'>Optional:</strong>
-                <ul className='list-disc pl-6 text-sm space-y-1 mt-1'>
-                  <li className='text-gray-700'><span className='font-medium'>Delivery Preview</span> API keys</li>
-                  <li className='text-gray-700'><span className='font-medium'>Management</span> API keys</li>
-                </ul>
-              </div>
+              {isDialogMode ? (
+                <details 
+                  className='mode-card-details' 
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label='Requirements for All environments mode'
+                >
+                  <summary 
+                    className='text-sm font-semibold text-gray-500 cursor-pointer'
+                    aria-label='View requirements for All environments mode'
+                  >
+                    Requirements
+                  </summary>
+                  <div className='text-sm text-gray-500 mt-1 pl-4' role='region' aria-label='All environments requirements list'>
+                    <ul className='list-disc pl-4 text-sm space-y-1' role='list'>
+                      <li className='text-gray-700'>Subscription ID</li>
+                      <li className='text-gray-700'>Subscription API key</li>
+                    </ul>
+                    <strong className='mt-2 block'>Optional:</strong>
+                    <ul className='list-disc pl-4 text-sm space-y-1 mt-1' role='list' aria-label='Optional credentials'>
+                      <li className='text-gray-700'><span className='font-medium'>Delivery Preview</span> API keys</li>
+                      <li className='text-gray-700'><span className='font-medium'>Management</span> API keys</li>
+                    </ul>
+                  </div>
+                </details>
+              ) : (
+                <div className='text-sm text-gray-500'>
+                  <strong>Required:</strong>
+                  <ul className='list-disc pl-6 text-sm space-y-1 mt-1'>
+                    <li className='text-gray-700'>Subscription ID</li>
+                    <li className='text-gray-700'>Subscription API key</li>
+                  </ul>
+                  <strong className='mt-3 block'>Optional:</strong>
+                  <ul className='list-disc pl-6 text-sm space-y-1 mt-1'>
+                    <li className='text-gray-700'><span className='font-medium'>Delivery Preview</span> API keys</li>
+                    <li className='text-gray-700'><span className='font-medium'>Management</span> API keys</li>
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1209,7 +1384,7 @@ function App() {
                   </p>
                 </div>
               </div>
-              <div className='mt-4 flex justify-end'>
+              <div className='mt-4 flex justify-end load-projects-btn-container'>
                 <button
                   onClick={async () => {
                     if (!subscriptionId || !subscriptionApiKey) return;
@@ -1535,7 +1710,7 @@ function App() {
                                   onClick={() => applyKeysToSameProject(originalIndex)}
                                   className='btn back-btn'
                                 >
-                                  Add keys to all environments in this project
+                                  Apply to all environments
                 </button>
                               </div>
               )}
@@ -1820,7 +1995,7 @@ function App() {
           )}
 
           {/* Button container - always visible */}
-          <div className="flex justify-between items-center mt-auto">
+          <div className={`flex items-center mt-auto button-container ${isDialogMode ? 'justify-center' : 'justify-between'} ${isDialogMode && appState.mode === 'all' && Object.keys(projectEnvMap).length === 0 ? 'with-divider' : ''}`}>
             <button
               onClick={() => setAppState(prev => ({ ...prev, ui: { ...prev.ui, currentStep: 'mode-selection' } }))}
               className='btn back-btn'
@@ -2177,7 +2352,7 @@ function App() {
           </div>
 
           {/* Button container - always visible at bottom */}
-          <div className='flex justify-between items-center mt-auto pt-12'>
+          <div className={`flex items-center mt-auto pt-12 button-container ${isDialogMode ? 'justify-center' : 'justify-between'}`}>
             <button
               onClick={() => {
                 // Reset to mode selection

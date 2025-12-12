@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@kontent-ai/custom-app-sdk": "^1.0.0",
+    "@kontent-ai/custom-app-sdk": "^2.1.1",
     "@kontent-ai/management-sdk": "^7.9.1",
     "@kontent-ai/delivery-sdk": "^16.3.0",
     "@tailwindcss/vite": "^4.1.10",
