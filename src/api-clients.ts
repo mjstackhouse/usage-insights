@@ -663,7 +663,7 @@ export class SubscriptionApiClient {
         statusCode = error.response.status;
         switch (statusCode) {
           case 400:
-            errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
+            errorMessage = 'Invalid Subscription ID. Please verify your Subscription ID and try again.';
             break;
           case 401:
             errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
@@ -672,7 +672,7 @@ export class SubscriptionApiClient {
             errorMessage = 'Insufficient permissions. Please verify your API key permissions and try again.';
             break;
           case 404:
-            errorMessage = 'Subscription not found. Please verify your subscription ID and try again.';
+            errorMessage = 'Subscription not found. Please verify your Subscription ID and try again.';
             break;
           default:
             errorMessage = `Subscription API error ${statusCode}: ${error.message || error.response.statusText}`;
@@ -681,7 +681,7 @@ export class SubscriptionApiClient {
         statusCode = error.status;
         switch (statusCode) {
           case 400:
-            errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
+            errorMessage = 'Invalid Subscription ID. Please verify your Subscription ID and try again.';
             break;
           case 401:
             errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
@@ -690,7 +690,7 @@ export class SubscriptionApiClient {
             errorMessage = 'Insufficient permissions. Please verify your API key permissions and try again.';
             break;
           case 404:
-            errorMessage = 'Subscription not found. Please verify your subscription ID and try again.';
+            errorMessage = 'Subscription not found. Please verify your Subscription ID and try again.';
             break;
           default:
             errorMessage = `Subscription API error ${statusCode}: ${error.message}`;
@@ -698,7 +698,7 @@ export class SubscriptionApiClient {
       } else if (error?.code === 'ERR_NETWORK' && error?.message === 'Network Error') {
         // Fallback for Network Error (likely 400)
         statusCode = 400;
-        errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
+        errorMessage = 'Invalid Subscription ID. Please verify your Subscription ID and try again.';
       } else {
         errorMessage = error instanceof Error ? error.message : 'Failed to load projects. Please verify your credentials and try again.';
       }
@@ -750,7 +750,7 @@ export class SubscriptionApiClient {
         statusCode = error.response.status;
         switch (statusCode) {
           case 400:
-            errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
+            errorMessage = 'Invalid Subscription ID. Please verify your Subscription ID and try again.';
             break;
           case 401:
             errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
@@ -759,7 +759,7 @@ export class SubscriptionApiClient {
             errorMessage = 'Insufficient permissions. Please verify your API key permissions and try again.';
             break;
           case 404:
-            errorMessage = 'Subscription not found. Please verify your subscription ID and try again.';
+            errorMessage = 'Subscription not found. Please verify your Subscription ID and try again.';
             break;
           default:
             errorMessage = `Subscription API error ${statusCode}: ${error.message || error.response.statusText}`;
@@ -768,7 +768,7 @@ export class SubscriptionApiClient {
         statusCode = error.status;
         switch (statusCode) {
           case 400:
-            errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
+            errorMessage = 'Invalid Subscription ID. Please verify your Subscription ID and try again.';
             break;
           case 401:
             errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
@@ -777,7 +777,7 @@ export class SubscriptionApiClient {
             errorMessage = 'Insufficient permissions. Please verify your API key permissions and try again.';
             break;
           case 404:
-            errorMessage = 'Subscription not found. Please verify your subscription ID and try again.';
+            errorMessage = 'Subscription not found. Please verify your Subscription ID and try again.';
             break;
           default:
             errorMessage = `Subscription API error ${statusCode}: ${error.message}`;
@@ -785,7 +785,7 @@ export class SubscriptionApiClient {
       } else if (error?.code === 'ERR_NETWORK' && error?.message === 'Network Error') {
         // Fallback for Network Error (likely 400)
         statusCode = 400;
-        errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
+        errorMessage = 'Invalid Subscription ID. Please verify your Subscription ID and try again.';
       } else {
         errorMessage = error instanceof Error ? error.message : 'Failed to load users. Please verify your credentials and try again.';
       }
@@ -825,7 +825,7 @@ export class SubscriptionApiClient {
         statusCode = error.response.status;
         switch (statusCode) {
           case 400:
-            errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
+            errorMessage = 'Invalid Subscription ID. Please verify your Subscription ID and try again.';
             break;
           case 401:
             errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
@@ -834,7 +834,7 @@ export class SubscriptionApiClient {
             errorMessage = 'Insufficient permissions. Please verify your API key permissions and try again.';
             break;
           case 404:
-            errorMessage = 'Subscription not found. Please verify your subscription ID and try again.';
+            errorMessage = 'Subscription not found. Please verify your Subscription ID and try again.';
             break;
           default:
             errorMessage = `Subscription API error ${statusCode}: ${error.message || error.response.statusText}`;
@@ -843,7 +843,7 @@ export class SubscriptionApiClient {
         statusCode = error.status;
         switch (statusCode) {
           case 400:
-            errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
+            errorMessage = 'Invalid Subscription ID. Please verify your Subscription ID and try again.';
             break;
           case 401:
             errorMessage = 'Invalid Subscription API key. Please verify your key and try again.';
@@ -852,7 +852,7 @@ export class SubscriptionApiClient {
             errorMessage = 'Insufficient permissions. Please verify your API key permissions and try again.';
             break;
           case 404:
-            errorMessage = 'Subscription not found. Please verify your subscription ID and try again.';
+            errorMessage = 'Subscription not found. Please verify your Subscription ID and try again.';
             break;
           default:
             errorMessage = `Subscription API error ${statusCode}: ${error.message}`;
@@ -860,7 +860,7 @@ export class SubscriptionApiClient {
       } else if (error?.code === 'ERR_NETWORK' && error?.message === 'Network Error') {
         // Fallback for Network Error (likely 400)
         statusCode = 400;
-        errorMessage = 'Invalid Subscription ID. Please verify your subscription ID and try again.';
+        errorMessage = 'Invalid Subscription ID. Please verify your Subscription ID and try again.';
       } else {
         errorMessage = error instanceof Error ? error.message : 'Invalid Subscription API key. Please verify your key and try again.';
       }

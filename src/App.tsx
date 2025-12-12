@@ -273,12 +273,23 @@ function App() {
     // Clear API key validation errors for this specific field
     setApiKeyValidationErrors(prev => {
       const newErrors = { ...prev };
-      delete newErrors[`env-${index}-${field.replace('ApiKey', '').replace('Id', '')}`];
+      // Handle special case for subscriptionId -> subscription-id
+      if (field === 'subscriptionId') {
+        delete newErrors[`env-${index}-subscription-id`];
+      } else {
+        delete newErrors[`env-${index}-${field.replace('ApiKey', '').replace('Id', '')}`];
+      }
       return newErrors;
     });
     
     // Hide the error element for this field
-    const errorElement = document.getElementById(`api-key-error-env-${index}-${field.replace('ApiKey', '').replace('Id', '')}`) as HTMLElement;
+    let errorElementId: string;
+    if (field === 'subscriptionId') {
+      errorElementId = `api-key-error-env-${index}-subscription-id`;
+    } else {
+      errorElementId = `api-key-error-env-${index}-${field.replace('ApiKey', '').replace('Id', '')}`;
+    }
+    const errorElement = document.getElementById(errorElementId) as HTMLElement;
     if (errorElement) {
       errorElement.classList.add('hidden');
     }
@@ -316,6 +327,11 @@ function App() {
     }));
   };
 
+  // Validate UUID length (36 characters for standard UUID format)
+  const isValidUuidLength = (id: string): boolean => {
+    return id.trim().length === 36;
+  };
+
   // Validate that all environments have at least one API key
   const validateEnvironmentCredentials = (): { isValid: boolean; errors: string[] } => {
     const errors: string[] = [];
@@ -324,6 +340,16 @@ function App() {
       if (!cred.environmentId.trim()) {
         errors.push(`Environment ${index + 1}: Environment ID is required`);
         return;
+      }
+      
+      if (!isValidUuidLength(cred.environmentId)) {
+        errors.push(`Environment ${index + 1}: Environment ID must be 36 characters (UUID format)`);
+        return;
+      }
+      
+      // Validate subscription ID if provided (must be 36 characters)
+      if (cred.subscriptionId?.trim() && !isValidUuidLength(cred.subscriptionId)) {
+        errors.push(`Environment ${index + 1}: Subscription ID must be 36 characters (UUID format)`);
       }
       
       const hasAnyKey = cred.deliveryApiKey?.trim() || 
@@ -381,7 +407,13 @@ function App() {
           const subClient = new SubscriptionApiClient(cred.subscriptionId, cred.subscriptionApiKey);
           const testResult = await subClient.testSubscriptionApiKey();
           if (!testResult.success) {
-            errors[`env-${i}-subscription`] = typeof testResult.error === 'string' ? testResult.error : 'Invalid Subscription API key. Please verify your key and try again.';
+            const errorMessage = typeof testResult.error === 'string' ? testResult.error : 'Invalid Subscription API key. Please verify your key and try again.';
+            // Check if error is about Subscription ID (400 status) vs Subscription API key (401 status)
+            if (errorMessage.includes('Subscription ID') || errorMessage.includes('subscription ID')) {
+              errors[`env-${i}-subscription-id`] = errorMessage;
+            } else {
+              errors[`env-${i}-subscription`] = errorMessage;
+            }
           }
         } catch (error) {
           errors[`env-${i}-subscription`] = 'Invalid Subscription API key. Please verify your key and try again.';
@@ -397,6 +429,12 @@ function App() {
 
   // Check if the form is valid for enabling/disabling the collect button
   const isFormValid = (): boolean => {
+    // In "all environments" mode, also validate subscription ID length
+    if (appState.mode === 'all') {
+      if (!subscriptionId.trim() || !isValidUuidLength(subscriptionId)) {
+        return false;
+      }
+    }
     return validateEnvironmentCredentials().isValid;
   };
 
@@ -1134,7 +1172,7 @@ function App() {
                     placeholder='Subscription ID'
                     aria-describedby='subscription-id-error subscription-id-tooltip'
                   />
-                  <p id='subscription-id-error' className='hidden absolute bottom-11.5 left-[125px] inline-flex items-stretch rounded-lg overflow-hidden'>
+                  <p id='subscription-id-error' className='hidden absolute bottom-10.5 left-[150px] inline-flex items-stretch rounded-lg overflow-hidden'>
                     <span className='bg-(--red) text-white px-2 py-[0.25rem] inline-flex items-center flex-shrink-0 message-icon-section'>
                       <span className='error-icon'>⚠</span>
                     </span>
@@ -1161,7 +1199,7 @@ function App() {
                     placeholder='Subscription API key'
                     aria-describedby='subscription-api-key-error subscription-api-key-tooltip'
                   />
-                  <p id='subscription-api-key-error' className='hidden absolute bottom-11.5 left-[160px] inline-flex items-stretch rounded-lg overflow-hidden'>
+                  <p id='subscription-api-key-error' className='hidden absolute bottom-10.5 left-[190px] inline-flex items-stretch rounded-lg overflow-hidden'>
                     <span className='bg-(--red) text-white px-2 py-[0.25rem] inline-flex items-center flex-shrink-0 message-icon-section'>
                       <span className='error-icon'>⚠</span>
                     </span>
@@ -1175,6 +1213,7 @@ function App() {
                 <button
                   onClick={async () => {
                     if (!subscriptionId || !subscriptionApiKey) return;
+                    if (!isValidUuidLength(subscriptionId)) return;
                     
                     setIsLoadingProjects(true);
                     
@@ -1239,7 +1278,7 @@ function App() {
                         } else if (res.error && typeof res.error === 'object') {
                           const errorCode = (res.error as any).status || (res.error as any).code;
                           if (errorCode === 400) {
-                            setSubscriptionIdErrorText('Invalid Subscription ID. Please verify your subscription ID and try again.');
+                            setSubscriptionIdErrorText('Invalid Subscription ID. Please verify your Subscription ID and try again.');
                             if (subscriptionIdError) {
                           subscriptionIdError.classList.remove('hidden');
                           subscriptionIdError.style.display = ''; // Clear any inline display style
@@ -1269,7 +1308,7 @@ function App() {
                       console.error('Error loading projects:', e);
                       // Handle network or other errors
                       if (e?.response?.status === 400) {
-                        setSubscriptionIdErrorText('Invalid Subscription ID. Please verify your subscription ID and try again.');
+                        setSubscriptionIdErrorText('Invalid Subscription ID. Please verify your Subscription ID and try again.');
                         if (subscriptionIdError) {
                           subscriptionIdError.classList.remove('hidden');
                           subscriptionIdError.style.display = ''; // Clear any inline display style
@@ -1294,7 +1333,7 @@ function App() {
                       setIsLoadingProjects(false);
                     }
                   }}
-                  disabled={isLoadingProjects}
+                  disabled={isLoadingProjects || !subscriptionId.trim() || !subscriptionApiKey.trim() || !isValidUuidLength(subscriptionId)}
                   className='btn continue-btn'
                 >
                   {isLoadingProjects ? (
@@ -1450,7 +1489,7 @@ function App() {
                                   aria-describedby={`api-key-error-env-${originalIndex}-delivery`}
                                   aria-invalid={!!apiKeyValidationErrors[`env-${originalIndex}-delivery`]}
                                 />
-                                <p id={`api-key-error-env-${originalIndex}-delivery`} className='hidden absolute bottom-10.5 left-[155px] inline-flex items-stretch rounded-lg overflow-hidden'>
+                                <p id={`api-key-error-env-${originalIndex}-delivery`} className='hidden absolute bottom-10 left-[180px] inline-flex items-stretch rounded-lg overflow-hidden'>
                                   <span className='bg-(--red) text-white px-2 py-[0.25rem] inline-flex items-center flex-shrink-0 message-icon-section'>
                                     <span className='error-icon'>⚠</span>
                                   </span>
@@ -1479,7 +1518,7 @@ function App() {
                                   aria-describedby={`api-key-error-env-${originalIndex}-management`}
                                   aria-invalid={!!apiKeyValidationErrors[`env-${originalIndex}-management`]}
                                 />
-                                <p id={`api-key-error-env-${originalIndex}-management`} className='hidden absolute bottom-10 left-[132px] inline-flex items-stretch rounded-lg overflow-hidden'>
+                                <p id={`api-key-error-env-${originalIndex}-management`} className='hidden absolute bottom-10 left-[160px] inline-flex items-stretch rounded-lg overflow-hidden'>
                                   <span className='bg-(--red) text-white px-2 py-[0.25rem] inline-flex items-center flex-shrink-0 message-icon-section'>
                                     <span className='error-icon'>⚠</span>
                                   </span>
@@ -1621,7 +1660,7 @@ function App() {
                           aria-describedby={`api-key-error-env-${index}-delivery`}
                           aria-invalid={!!apiKeyValidationErrors[`env-${index}-delivery`]}
                         />
-                        <p id={`api-key-error-env-${index}-delivery`} className='hidden absolute bottom-10.5 left-[200px] inline-flex items-stretch rounded-lg overflow-hidden'>
+                        <p id={`api-key-error-env-${index}-delivery`} className='hidden absolute bottom-10 left-[180px] inline-flex items-stretch rounded-lg overflow-hidden'>
                           <span className='bg-(--red) text-white px-2 py-[0.25rem] inline-flex items-center flex-shrink-0 message-icon-section'>
                             <span className='error-icon'>⚠</span>
                           </span>
@@ -1650,7 +1689,7 @@ function App() {
                           aria-describedby={`api-key-error-env-${index}-management`}
                           aria-invalid={!!apiKeyValidationErrors[`env-${index}-management`]}
                         />
-                        <p id={`api-key-error-env-${index}-management`} className='hidden absolute bottom-10 left-[230px] inline-flex items-stretch rounded-lg overflow-hidden'>
+                        <p id={`api-key-error-env-${index}-management`} className='hidden absolute bottom-10 left-[160px] inline-flex items-stretch rounded-lg overflow-hidden'>
                           <span className='bg-(--red) text-white px-2 py-[0.25rem] inline-flex items-center flex-shrink-0 message-icon-section'>
                             <span className='error-icon'>⚠</span>
                           </span>
@@ -1659,7 +1698,7 @@ function App() {
                           </span>
                         </p>
                   </div>
-                      <div>
+                      <div className='relative'>
                         <label className='block text-sm font-semibold mb-2 flex items-center gap-1'>
                           Subscription ID
                           <span 
@@ -1676,7 +1715,17 @@ function App() {
                           onChange={(e) => updateEnvironmentCredential(index, 'subscriptionId', e.target.value)}
                           className='w-full px-3 py-2 border border-gray-300 rounded-md'
                           placeholder='Subscription ID (required for Subscription API)'
+                          aria-describedby={`api-key-error-env-${index}-subscription-id`}
+                          aria-invalid={!!apiKeyValidationErrors[`env-${index}-subscription-id`]}
                         />
+                        <p id={`api-key-error-env-${index}-subscription-id`} className='hidden absolute bottom-10 left-[128px] inline-flex items-stretch rounded-lg overflow-hidden'>
+                          <span className='bg-(--red) text-white px-2 py-[0.25rem] inline-flex items-center flex-shrink-0 message-icon-section'>
+                            <span className='error-icon'>⚠</span>
+                          </span>
+                          <span className='bg-gray-100 text-black px-2 py-[0.25rem] inline-flex items-center text-xs'>
+                            {apiKeyValidationErrors[`env-${index}-subscription-id`]}
+                          </span>
+                        </p>
                   </div>
                       <div className='relative'>
                         <label className='block text-sm font-semibold mb-2 flex items-center gap-1'>
@@ -1698,7 +1747,7 @@ function App() {
                           aria-describedby={`api-key-error-env-${index}-subscription`}
                           aria-invalid={!!apiKeyValidationErrors[`env-${index}-subscription`]}
                         />
-                        <p id={`api-key-error-env-${index}-subscription`} className='hidden absolute bottom-10 left-[250px] inline-flex items-stretch rounded-lg overflow-hidden'>
+                        <p id={`api-key-error-env-${index}-subscription`} className='hidden absolute bottom-10 left-[158px] inline-flex items-stretch rounded-lg overflow-hidden'>
                           <span className='bg-(--red) text-white px-2 py-[0.25rem] inline-flex items-center flex-shrink-0 message-icon-section'>
                             <span className='error-icon'>⚠</span>
                           </span>
@@ -1783,7 +1832,7 @@ function App() {
               disabled={
                 isCollectingData || 
                 (appState.mode === 'all' 
-                  ? !subscriptionId.trim() || !subscriptionApiKey.trim() || Object.keys(projectEnvMap).length === 0
+                  ? !subscriptionId.trim() || !subscriptionApiKey.trim() || !isValidUuidLength(subscriptionId) || Object.keys(projectEnvMap).length === 0
                   : environmentCredentials.length === 0 || !isFormValid())
               }
               className='btn continue-btn'
@@ -2140,7 +2189,12 @@ function App() {
             </button>
             <button
               onClick={collectUsageData}
-              disabled={isCollectingData || environmentCredentials.length === 0 || !isFormValid()}
+              disabled={
+                isCollectingData || 
+                (appState.mode === 'all' 
+                  ? !subscriptionId.trim() || !subscriptionApiKey.trim() || !isValidUuidLength(subscriptionId) || Object.keys(projectEnvMap).length === 0
+                  : environmentCredentials.length === 0 || !isFormValid())
+              }
               className='btn continue-btn'
             >
               {isCollectingData ? 'Collecting Data...' : 'Refresh Data'}
