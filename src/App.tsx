@@ -1123,9 +1123,11 @@ function App() {
           </svg>
         </button>
       )}
-      <p id='app-title' className='text-white'>
-        Usage Insights
-      </p>
+      <header>
+        <h1 id='app-title' className='text-white'>
+          Usage Insights
+        </h1>
+      </header>
 
       <main>
       {/* New Usage Insights UI */}
