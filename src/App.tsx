@@ -1127,6 +1127,7 @@ function App() {
         Usage Insights
       </p>
 
+      <main>
       {/* New Usage Insights UI */}
       {appState.ui.currentStep === 'mode-selection' && (
         <div className='basis-full flex flex-wrap place-content-start'>
@@ -1166,7 +1167,7 @@ function App() {
                   >
                     Requirements
                   </summary>
-                  <div className='text-sm text-gray-500 mt-1 pl-4' role='region' aria-label='Individual environments requirements list'>
+                  <div className='text-sm text-gray-700 mt-1 pl-4' role='region' aria-label='Individual environments requirements list'>
                     <ul className='list-disc pl-4 text-sm space-y-1' role='list'>
                       <li className='text-gray-700'>Environment ID</li>
                       <li className='text-gray-700'>
@@ -1181,7 +1182,7 @@ function App() {
                   </div>
                 </details>
               ) : (
-                <div className='text-sm text-gray-500'>
+                <div className='text-sm text-gray-700'>
                   <strong>Required:</strong>
                   <ul className='list-disc pl-6 text-sm space-y-1 mt-1'>
                     <li className='text-gray-700'>Environment ID</li>
@@ -1231,7 +1232,7 @@ function App() {
                   >
                     Requirements
                   </summary>
-                  <div className='text-sm text-gray-500 mt-1 pl-4' role='region' aria-label='All environments requirements list'>
+                  <div className='text-sm text-gray-700 mt-1 pl-4' role='region' aria-label='All environments requirements list'>
                     <ul className='list-disc pl-4 text-sm space-y-1' role='list'>
                       <li className='text-gray-700'>Subscription ID</li>
                       <li className='text-gray-700'>Subscription API key</li>
@@ -1244,7 +1245,7 @@ function App() {
                   </div>
                 </details>
               ) : (
-                <div className='text-sm text-gray-500'>
+                <div className='text-sm text-gray-700'>
                   <strong>Required:</strong>
                   <ul className='list-disc pl-6 text-sm space-y-1 mt-1'>
                     <li className='text-gray-700'>Subscription ID</li>
@@ -2350,6 +2351,7 @@ function App() {
           </div>
               </div>
             )}
+      </main>
     </>
   )
 }
