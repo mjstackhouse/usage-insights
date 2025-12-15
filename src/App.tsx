@@ -1276,55 +1276,28 @@ function App() {
             </p>
           </div>
 
-          {appState.mode === 'individual' && (
-            <details className='mb-12'>
-              <summary className='text-sm font-semibold text-left cursor-pointer bg-[rgb(243,243,243)]'>
-                About keys and metrics
-              </summary>
-              <div className='rounded-b-lg px-4 pb-4 pt-2 text-left bg-[rgb(243,243,243)]'>
-                <ul className='list-disc pl-6 space-y-1 text-sm text-gray-700'>
-                  <li>
-                    <span className='font-medium'>Delivery Preview API key</span>: Used for Delivery API requests. Provides counts for
-                    content items, content types, and languages.
-                  </li>
-                  <li>
-                    <span className='font-medium'>Management API key</span>: Used for Management API requests. Provides
-                    asset metrics (asset count and Asset storage size) and collections.
-                  </li>
-                  <li>
-                    <span className='font-medium'>Subscription ID + Subscription API key</span>: Used for Subscription API
-                    requests. Provides active user counts per environment and loads
-                    projects/environments in 'All environments' mode.
-                  </li>
-                </ul>
-              </div>
-            </details>
-          )}
-
-          {appState.mode === 'all' && (
-            <details className='mb-6'>
-              <summary className='text-sm font-semibold text-left cursor-pointer bg-[rgb(243,243,243)]'>
-                About keys and metrics
-              </summary>
-              <div className='rounded-b-lg px-4 pb-4 pt-2 text-left bg-[rgb(243,243,243)]'>
-                <ul className='list-disc pl-6 space-y-1 text-sm text-gray-700'>
-                  <li>
-                    <span className='font-medium'>Delivery Preview API key</span>: Used for Delivery API requests. Provides counts for
-                    content items, content types, and languages.
-                  </li>
-                  <li>
-                    <span className='font-medium'>Management API key</span>: Used for Management API requests. Provides
-                    asset metrics (asset count and asset storage size) and collections.
-                  </li>
-                  <li>
-                    <span className='font-medium'>Subscription ID + Subscription API key</span>: Used for Subscription API
-                    requests. Provides active user counts per environment and loads
-                    projects/environments in 'All environments' mode.
-                  </li>
-                </ul>
-              </div>
-            </details>
-          )}
+          <details className={appState.mode === 'individual' ? 'mb-12' : 'mb-6'}>
+            <summary className='text-sm font-semibold text-left cursor-pointer bg-[rgb(243,243,243)]'>
+              About keys and metrics
+            </summary>
+            <div className='rounded-b-lg px-4 pb-4 pt-2 text-left bg-[rgb(243,243,243)]'>
+              <ul className='list-disc pl-6 space-y-1 text-sm text-gray-700'>
+                <li>
+                  <span className='font-medium'>Delivery Preview API key</span>: Used for Delivery API requests. Provides counts for
+                  content items, content types, and languages.
+                </li>
+                <li>
+                  <span className='font-medium'>Management API key</span>: Used for Management API requests. Provides
+                  asset metrics (asset count and asset storage), collections, custom roles, and spaces.
+                </li>
+                <li>
+                  <span className='font-medium'>Subscription ID + Subscription API key</span>: Used for Subscription API
+                  requests. Provides active user counts per environment and loads
+                  projects/environments in 'All environments' mode.
+                </li>
+              </ul>
+            </div>
+          </details>
 
           {appState.mode === 'all' && (
             <div className='basis-full mb-12'>
