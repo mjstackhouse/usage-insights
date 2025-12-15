@@ -39,7 +39,6 @@ function App() {
   const [projectEnvMap, setProjectEnvMap] = useState<Record<string, { project: string; projectId: string; envName: string }>>({});
   const [subscriptionIdErrorText, setSubscriptionIdErrorText] = useState<string>('');
   const [subscriptionApiKeyErrorText, setSubscriptionApiKeyErrorText] = useState<string>('');
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [apiKeyValidationErrors, setApiKeyValidationErrors] = useState<Record<string, string>>({});
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
@@ -179,11 +178,6 @@ function App() {
       });
     });
 
-    const validationBox = document.getElementById('validation-errors');
-    if (validationBox) {
-      errorNodes.push(validationBox);
-    }
-
     if (errorNodes.length === 0) return;
 
     // Pick the one highest on the page
@@ -262,8 +256,6 @@ function App() {
       setExpandedInitialized(true);
       return next;
     });
-    // Clear validation errors when adding environment
-    setValidationErrors([]);
     setApiKeyValidationErrors({});
     
     // Hide all API key error elements
@@ -278,8 +270,6 @@ function App() {
         i === index ? { ...cred, [field]: value } : cred
       )
     );
-    // Clear validation errors when user makes changes
-    setValidationErrors([]);
     // Clear API key validation errors for this specific field
     setApiKeyValidationErrors(prev => {
       const newErrors = { ...prev };
@@ -307,8 +297,6 @@ function App() {
 
   const removeEnvironmentCredential = (index: number) => {
     setEnvironmentCredentials(prev => prev.filter((_, i) => i !== index));
-    // Clear validation errors when removing environment
-    setValidationErrors([]);
     setApiKeyValidationErrors({});
     
     // Hide all API key error elements
@@ -510,18 +498,6 @@ function App() {
       loadingContainer.style.display = 'flex';
     }
     
-    // Validate credentials before proceeding
-    const validation = validateEnvironmentCredentials();
-    setValidationErrors(validation.errors);
-    
-    if (!validation.isValid) {
-      setIsCollectingData(false);
-      // Wait a tick so the validation UI renders, then scroll
-      setTimeout(scrollToFirstError, 0);
-      if (loadingContainer) loadingContainer.style.display = 'none';
-      return;
-    }
-
     // Test API key validity before proceeding
     setApiKeyValidationErrors({});
     setLoadingText('Testing API keys...');
@@ -1153,7 +1129,7 @@ function App() {
                 }
               }}
             >
-              <h3 className='text-lg font-semibold'>Individual environments</h3>
+              <h2 className='text-lg font-semibold'>Individual environments</h2>
               <p className={`text-gray-600 ${isDialogMode ? 'mb-2' : 'mb-4'}`}>
                 Analyze usage metrics for individually-added environments.
               </p>
@@ -1218,7 +1194,7 @@ function App() {
                 }
               }}
             >
-              <h3 className='text-lg font-semibold'>All environments</h3>
+              <h2 className='text-lg font-semibold'>All environments</h2>
               <p className={`text-gray-600 ${isDialogMode ? 'mb-2' : 'mb-4'}`}>
                 Analyze usage metrics across all environments in your subscription.
               </p>
@@ -1504,9 +1480,9 @@ function App() {
           {(appState.mode === 'individual' || (appState.mode === 'all' && Object.keys(projectEnvMap).length > 0)) && (
             <div className='basis-full mb-6'>
               <div className='flex justify-between items-center mb-6'>
-                <h3 className='text-lg font-semibold'>
+                <h2 className='text-lg font-semibold'>
                   {appState.mode === 'all' ? 'Projects & environments' : 'Environments'}
-                </h3>
+                </h2>
                 <div className='flex items-center gap-2'>
                   <button 
                     onClick={collapseAllSections}
@@ -1570,9 +1546,9 @@ function App() {
     return (
                           <div key={originalIndex} className='border border-gray-200 rounded-lg p-4 mb-4 bg-white'>
                             <div className='flex justify-between items-center mb-4'>
-                              <h4 className='text-base font-bold text-gray-800'>
+                              <h3 className='text-base font-bold text-gray-800'>
                                 {projectEnvMap[cred.environmentId]?.envName} ({cred.environmentId})
-                              </h4>
+                              </h3>
                               {environmentCredentials.length > 1 && (
                                 <button
                                   onClick={() => removeEnvironmentCredential(originalIndex)}
@@ -1952,21 +1928,6 @@ function App() {
               </div>
             )}
 
-            {validationErrors.length > 0 && (
-              <div
-                id='validation-errors'
-                className='mt-6 p-4 bg-red-50 border border-red-200 rounded-lg'
-                role='alert'
-                aria-live='assertive'
-              >
-                <h4 className='text-sm font-semibold text-red-800 mb-2'>Please fix the following issues:</h4>
-                <ul className='text-sm text-red-700 space-y-1'>
-                  {validationErrors.map((error, index) => (
-                    <li key={index}>• {error}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
             </div>
           )}
 
@@ -2109,9 +2070,9 @@ function App() {
           <hr className='assets-divider mb-6' />
           <div className='basis-full flex-grow'>
             <div className='flex justify-between items-center mb-6'>
-              <h3 className='text-lg font-semibold'>
+              <h2 className='text-lg font-semibold'>
                 {appState.mode === 'all' ? 'Projects & environments' : 'Environments'}
-              </h3>
+              </h2>
               {appState.mode === 'all' && (
                 <div className='flex items-center gap-2'>
                 <button
@@ -2173,9 +2134,9 @@ function App() {
                         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'>
                           {environments.map((env) => (
                             <div key={env.environmentId} className='border border-gray-200 rounded-lg p-6 bg-white'>
-                              <h4 className='text-base font-bold text-gray-800 mb-2'>
+                              <h3 className='text-base font-bold text-gray-800 mb-2'>
                                 {projectEnvMap[env.environmentId]?.envName || 'Environment'}
-                              </h4>
+                              </h3>
                               <div className='font-mono font-bold text-sm mb-4 break-all'>{env.environmentId}</div>
                               <div className='space-y-2'>
                                 <div className='flex justify-between'>
