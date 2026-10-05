@@ -8,6 +8,31 @@ export interface EnvironmentCredentials {
   subscriptionId?: string;
 }
 
+// Keys file saved and loaded by the user, so keys don't have to be re-entered on every run.
+// Names are included for readability only; environments are matched by ID.
+export interface KeysFileEntry {
+  environmentId: string;
+  projectName?: string;
+  environmentName?: string;
+  deliveryApiKey?: string;
+  managementApiKey?: string;
+}
+
+// Decrypted contents of a keys file
+export interface KeysFilePayload {
+  savedAt: string;
+  environments: KeysFileEntry[];
+}
+
+// Keys file as stored on disk: the payload is encrypted with a key derived from the user's passphrase
+export interface EncryptedKeysFile {
+  type: 'kontent-ai-usage-insights-keys';
+  version: 2;
+  kdf: { name: 'PBKDF2'; hash: 'SHA-256'; iterations: number; salt: string };
+  cipher: { name: 'AES-GCM'; iv: string };
+  data: string;
+}
+
 export interface SubscriptionCredentials {
   subscriptionId: string;
   subscriptionApiKey: string;
@@ -19,6 +44,7 @@ export interface UsageMetrics {
   bandwidth: number; // Estimated from API calls
   collections: number;
   contentItems: number; // All languages/variants
+  literalContentItems: number | null; // Content items regardless of variants; null if not retrieved
   contentTypes: number;
   assetStorageSize: number; // In bytes
   assetCount: number;
