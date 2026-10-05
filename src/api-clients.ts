@@ -13,6 +13,15 @@ import type {
   ProjectSummary
 } from './types';
 
+// The parts of a Subscription API user record used for counting active users
+interface SubscriptionUserRecord {
+  email?: string;
+  projects?: { environments?: { id: string; is_user_active?: boolean }[] }[];
+}
+
+// Subscription users downloaded during one data collection run, keyed by Subscription ID and API key
+export type SubscriptionUsersCache = Map<string, Promise<SubscriptionUserRecord[]>>;
+
 export class KontentApiClient {
   constructor(_credentials: EnvironmentCredentials) {
     // Constructor for future use
@@ -90,13 +99,18 @@ export class KontentApiClient {
     }
   }
 
-  async collectEnvironmentData(environmentId: string, credentials: EnvironmentCredentials): Promise<ApiResponse<EnvironmentData>> {
+  async collectEnvironmentData(
+    environmentId: string,
+    credentials: EnvironmentCredentials,
+    subscriptionUsersCache?: SubscriptionUsersCache
+  ): Promise<ApiResponse<EnvironmentData>> {
     try {
       const metrics: UsageMetrics = {
         activeUsers: 0,
         bandwidth: 0,
         collections: 0,
         contentItems: 0,
+        literalContentItems: null,
         contentTypes: 0,
         assetStorageSize: 0,
         assetCount: 0,
@@ -131,18 +145,26 @@ export class KontentApiClient {
         if (managementData.success && managementData.data) {
           Object.assign(metrics, managementData.data);
         }
+
+        // Counted separately so a failure in the other Management API requests doesn't affect it
+        metrics.literalContentItems = await this.countContentItems(environmentId, credentials.managementApiKey);
       }
 
       // Subscription API: count active non-kontent.ai users in this environment
       if (credentials.subscriptionApiKey && credentials.subscriptionId) {
         try {
-          const activeUsers = await this.countActiveSubscriptionUsersForEnvironment(
-            credentials.subscriptionId,
-            credentials.subscriptionApiKey,
-            environmentId
-          );
-          metrics.activeUsers = activeUsers;
+          // The user list is the same for every environment in a subscription, so download it once per run
+          const cacheKey = `${credentials.subscriptionId}|${credentials.subscriptionApiKey}`;
+          let usersRequest = subscriptionUsersCache?.get(cacheKey);
+          if (!usersRequest) {
+            usersRequest = this.fetchSubscriptionUsers(credentials.subscriptionId, credentials.subscriptionApiKey);
+            subscriptionUsersCache?.set(cacheKey, usersRequest);
+          }
+          const users = await usersRequest;
+          metrics.activeUsers = this.countActiveUsersInEnvironment(users, environmentId);
         } catch (e) {
+          // Let the next environment retry instead of reusing a failed download
+          subscriptionUsersCache?.delete(`${credentials.subscriptionId}|${credentials.subscriptionApiKey}`);
           console.warn('Failed to count subscription users:', e);
         }
       }
@@ -357,15 +379,28 @@ export class KontentApiClient {
     }
   }
 
+  // Uses Management API: GET /items lists every content item, including items without any variants.
+  // Returns null if the count couldn't be retrieved, so a partial count is never shown.
+  private async countContentItems(environmentId: string, apiKey: string): Promise<number | null> {
+    try {
+      const client = createManagementClient({
+        environmentId,
+        apiKey
+      });
+
+      const itemsResponse = await client.listContentItems().toAllPromise();
+      return itemsResponse.data.items.length;
+    } catch (error) {
+      console.warn('Failed to get content items from Management API:', error);
+      return null;
+    }
+  }
+
   // Uses Subscription API: GET /{subscription_id}/users with continuation to aggregate users
-  private async countActiveSubscriptionUsersForEnvironment(
-    subscriptionId: string,
-    subscriptionApiKey: string,
-    environmentId: string
-  ): Promise<number> {
+  private async fetchSubscriptionUsers(subscriptionId: string, subscriptionApiKey: string): Promise<SubscriptionUserRecord[]> {
     const baseUrl = `https://manage.kontent.ai/v2/subscriptions/${subscriptionId}/users`;
     let continuation: string | undefined = undefined;
-    let total = 0;
+    const allUsers: SubscriptionUserRecord[] = [];
 
     // Loop pages
     // Avoid parallel requests per Subscription API guidance
@@ -385,36 +420,42 @@ export class KontentApiClient {
       }
 
       const data = await res.json();
-      const users = Array.isArray(data.users) ? data.users : [];
-
-      // Sum users active in the specified environment and not kontent.ai emails
-      for (const user of users) {
-        const email: string = user.email || '';
-        if (email.toLowerCase().endsWith('@kontent.ai')) {
-          continue;
-        }
-
-        // projects[].environments[] contains environment assignments with is_user_active
-        const projects = Array.isArray(user.projects) ? user.projects : [];
-        let isActiveInEnv = false;
-        for (const proj of projects) {
-          const envs = Array.isArray(proj.environments) ? proj.environments : [];
-          for (const env of envs) {
-            if (env && env.id === environmentId && env.is_user_active === true) {
-              isActiveInEnv = true;
-              break;
-            }
-          }
-          if (isActiveInEnv) break;
-        }
-
-        if (isActiveInEnv) {
-          total += 1;
-        }
-      }
+      allUsers.push(...(Array.isArray(data.users) ? data.users : []));
 
       continuation = data?.pagination?.continuation_token || undefined;
     } while (continuation);
+
+    return allUsers;
+  }
+
+  // Counts users active in the specified environment, excluding kontent.ai emails
+  private countActiveUsersInEnvironment(users: SubscriptionUserRecord[], environmentId: string): number {
+    let total = 0;
+
+    for (const user of users) {
+      const email: string = user.email || '';
+      if (email.toLowerCase().endsWith('@kontent.ai')) {
+        continue;
+      }
+
+      // projects[].environments[] contains environment assignments with is_user_active
+      const projects = Array.isArray(user.projects) ? user.projects : [];
+      let isActiveInEnv = false;
+      for (const proj of projects) {
+        const envs = Array.isArray(proj.environments) ? proj.environments : [];
+        for (const env of envs) {
+          if (env && env.id === environmentId && env.is_user_active === true) {
+            isActiveInEnv = true;
+            break;
+          }
+        }
+        if (isActiveInEnv) break;
+      }
+
+      if (isActiveInEnv) {
+        total += 1;
+      }
+    }
 
     return total;
   }
@@ -638,7 +679,8 @@ export class SubscriptionApiClient {
       const response = await client.listSubscriptionProjects().toAllPromise();
 
       
-      const projects: ProjectSummary[] = response.data.items.map((project: any) => ({
+      // Archived projects are listed too (is_active: false); leave them out, as the usage report does
+      const projects: ProjectSummary[] = response.data.items.filter(project => project.isActive).map((project: any) => ({
         id: project.id,
         name: project.name,
         environments: project.environments.map((env: any) => ({ 

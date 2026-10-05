@@ -2,11 +2,64 @@ import { useEffect, useState, useRef } from 'react'
 import './App.css'
 import * as XLSX from 'xlsx';
 import type { 
+  ApiResponse,
   AppState, 
   EnvironmentCredentials, 
-  EnvironmentData
+  EncryptedKeysFile,
+  EnvironmentData,
+  KeysFileEntry
 } from './types';
 import { KontentApiClient, SubscriptionApiClient } from './api-clients';
+import type { SubscriptionUsersCache } from './api-clients';
+import { decryptKeysFile, encryptKeysFile, parseEncryptedKeysFile } from './keys-file-crypto';
+
+const MIN_PASSPHRASE_LENGTH = 8;
+
+// Password field with a show/hide toggle, used for keys file passphrases
+function PassphraseInput({ id, label, value, onChange, inputRef, autoComplete }: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  inputRef?: React.Ref<HTMLInputElement>;
+  autoComplete: 'new-password' | 'current-password';
+}) {
+  const [isVisible, setIsVisible] = useState(false);
+  return (
+    <div>
+      <label htmlFor={id} className='block text-sm font-semibold mb-2'>{label}</label>
+      <div className='relative'>
+        <input
+          ref={inputRef}
+          id={id}
+          type={isVisible ? 'text' : 'password'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          autoComplete={autoComplete}
+          className='w-full px-3 py-2 pr-11 border border-gray-300 rounded-md'
+        />
+        <button
+          type='button'
+          onClick={() => setIsVisible(!isVisible)}
+          aria-label={isVisible ? 'Hide passphrase' : 'Show passphrase'}
+          aria-pressed={isVisible}
+          className='absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 cursor-pointer'
+        >
+          {isVisible ? (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" style={{ width: '20px', height: '20px' }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" style={{ width: '20px', height: '20px' }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+            </svg>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function App() {
   // Main app state
@@ -48,6 +101,18 @@ function App() {
   const exportDropdownRef = useRef<HTMLDivElement>(null);
   const exportButtonRef = useRef<HTMLButtonElement>(null);
   const [exportDropdownWidth, setExportDropdownWidth] = useState<number | undefined>(undefined);
+  // Keys file dialog: saving asks for a new passphrase, loading for the passphrase of the chosen file
+  const [keysDialog, setKeysDialog] = useState<{ mode: 'save' } | { mode: 'load'; file: EncryptedKeysFile } | null>(null);
+  const [passphrase, setPassphrase] = useState('');
+  const [passphraseConfirmation, setPassphraseConfirmation] = useState('');
+  const [keysDialogError, setKeysDialogError] = useState<string | null>(null);
+  const [isKeysDialogBusy, setIsKeysDialogBusy] = useState(false);
+  const [keysFileMessage, setKeysFileMessage] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
+  const keysFileInputRef = useRef<HTMLInputElement>(null);
+  const [isKeysDropdownOpen, setIsKeysDropdownOpen] = useState(false);
+  const keysDropdownRef = useRef<HTMLDivElement>(null);
+  const keysButtonRef = useRef<HTMLButtonElement>(null);
+  const passphraseInputRef = useRef<HTMLInputElement>(null);
 
   // New functions for usage insights
   // Prevent body scrolling when loading overlay is visible and scroll to top
@@ -150,6 +215,41 @@ function App() {
     };
   }, [isExportDropdownOpen]);
 
+  // Keys file dialog: focus the passphrase field when it opens, close it with Escape
+  useEffect(() => {
+    if (!keysDialog) return;
+    passphraseInputRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeKeysDialog();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [keysDialog]);
+
+  // Keys file notification: success disappears on its own, warnings and errors stay until closed
+  useEffect(() => {
+    if (keysFileMessage?.type !== 'success') return;
+    const timeout = setTimeout(() => setKeysFileMessage(null), 5000);
+    return () => clearTimeout(timeout);
+  }, [keysFileMessage]);
+
+  // Handle click outside to close keys file dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (keysDropdownRef.current && !keysDropdownRef.current.contains(event.target as Node)) {
+        setIsKeysDropdownOpen(false);
+      }
+    };
+
+    if (isKeysDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isKeysDropdownOpen]);
+
   const handleBackToTop = () => {
     const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const behavior: ScrollBehavior = prefersReducedMotion ? 'auto' : 'smooth';
@@ -204,6 +304,8 @@ function App() {
     }
   };
   const handleModeSelection = (mode: 'individual' | 'all') => {
+    setKeysDialog(null);
+    setKeysFileMessage(null);
     setAppState(prev => ({
       ...prev,
       mode,
@@ -368,6 +470,7 @@ function App() {
   // Test API key validity before data collection
   const testApiKeyValidity = async (): Promise<{ isValid: boolean; errors: Record<string, string> }> => {
     const errors: Record<string, string> = {};
+    const subscriptionTestResults = new Map<string, ApiResponse<boolean>>();
     
     for (let i = 0; i < environmentCredentials.length; i++) {
       const cred = environmentCredentials[i];
@@ -402,8 +505,14 @@ function App() {
       // Test Subscription API key if provided
       if (cred.subscriptionApiKey?.trim() && cred.subscriptionId?.trim()) {
         try {
-          const subClient = new SubscriptionApiClient(cred.subscriptionId, cred.subscriptionApiKey);
-          const testResult = await subClient.testSubscriptionApiKey();
+          // Environments usually share the same subscription credentials, so test each unique pair only once
+          const subscriptionKey = `${cred.subscriptionId}|${cred.subscriptionApiKey}`;
+          let testResult = subscriptionTestResults.get(subscriptionKey);
+          if (!testResult) {
+            const subClient = new SubscriptionApiClient(cred.subscriptionId, cred.subscriptionApiKey);
+            testResult = await subClient.testSubscriptionApiKey();
+            subscriptionTestResults.set(subscriptionKey, testResult);
+          }
           if (!testResult.success) {
             const errorMessage = typeof testResult.error === 'string' ? testResult.error : 'Invalid Subscription API key. Please verify your key and try again.';
             // Check if error is about Subscription ID (400 status) vs Subscription API key (401 status)
@@ -434,6 +543,165 @@ function App() {
       }
     }
     return validateEnvironmentCredentials().isValid;
+  };
+
+  // Keys file: lets users save the keys they entered and load them again on later runs.
+  // The tool itself still never stores keys; the file stays wherever the user saves it.
+  const hasKeysToSave = environmentCredentials.some(cred =>
+    cred.environmentId.trim() && (cred.deliveryApiKey?.trim() || cred.managementApiKey?.trim())
+  );
+
+  const openKeysDialog = (dialog: { mode: 'save' } | { mode: 'load'; file: EncryptedKeysFile }) => {
+    setPassphrase('');
+    setPassphraseConfirmation('');
+    setKeysDialogError(null);
+    setKeysDialog(dialog);
+  };
+
+  const closeKeysDialog = () => {
+    // Don't keep passphrases around once the dialog is closed
+    setPassphrase('');
+    setPassphraseConfirmation('');
+    setKeysDialogError(null);
+    setKeysDialog(null);
+    keysButtonRef.current?.focus();
+  };
+
+  const saveKeysToFile = async () => {
+    if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
+      setKeysDialogError(`The passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters long.`);
+      return;
+    }
+    if (passphrase !== passphraseConfirmation) {
+      setKeysDialogError("The passphrases don't match.");
+      return;
+    }
+
+    const environments: KeysFileEntry[] = environmentCredentials
+      .filter(cred => cred.environmentId.trim() && (cred.deliveryApiKey?.trim() || cred.managementApiKey?.trim()))
+      .map(cred => ({
+        environmentId: cred.environmentId.trim(),
+        projectName: projectEnvMap[cred.environmentId]?.project,
+        environmentName: projectEnvMap[cred.environmentId]?.envName,
+        deliveryApiKey: cred.deliveryApiKey?.trim() || undefined,
+        managementApiKey: cred.managementApiKey?.trim() || undefined
+      }));
+
+    setIsKeysDialogBusy(true);
+    try {
+      const keysFile = await encryptKeysFile({ savedAt: new Date().toISOString(), environments }, passphrase);
+      const blob = new Blob([JSON.stringify(keysFile, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `kontent-ai-usage-insights-keys-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      closeKeysDialog();
+    } catch (error) {
+      console.error('Failed to encrypt keys file:', error);
+      setKeysDialogError("The file couldn't be saved. Please try again.");
+    } finally {
+      setIsKeysDialogBusy(false);
+    }
+  };
+
+  // Called with the file chosen in the file picker; asks for its passphrase if it's a keys file
+  const openKeysFile = async (file: File) => {
+    const keysFile = parseEncryptedKeysFile(await file.text());
+    if (!keysFile) {
+      setKeysFileMessage({ type: 'error', text: "This file isn't a valid Usage Insights keys file." });
+      return;
+    }
+    openKeysDialog({ mode: 'load', file: keysFile });
+  };
+
+  const isValidKeysEntries = (entries: unknown): entries is KeysFileEntry[] =>
+    Array.isArray(entries) && entries.every(entry =>
+      typeof entry?.environmentId === 'string' &&
+      isValidUuidLength(entry.environmentId) &&
+      (entry.deliveryApiKey === undefined || typeof entry.deliveryApiKey === 'string') &&
+      (entry.managementApiKey === undefined || typeof entry.managementApiKey === 'string')
+    );
+
+  const loadKeysFromFile = async () => {
+    if (keysDialog?.mode !== 'load') return;
+
+    setIsKeysDialogBusy(true);
+    let entries: KeysFileEntry[];
+    try {
+      const payload = await decryptKeysFile(keysDialog.file, passphrase);
+      if (!isValidKeysEntries(payload?.environments)) throw new Error('Unexpected keys file contents');
+      entries = payload.environments;
+    } catch {
+      setKeysDialogError('Incorrect passphrase, or the file is damaged.');
+      return;
+    } finally {
+      setIsKeysDialogBusy(false);
+    }
+
+    closeKeysDialog();
+    applyKeysEntries(entries);
+  };
+
+  // Keys in the file replace the keys in the matching fields
+  const applyKeysEntries = (entries: KeysFileEntry[]) => {
+    const applyEntry = (cred: EnvironmentCredentials, entry: KeysFileEntry): EnvironmentCredentials => ({
+      ...cred,
+      ...(entry.deliveryApiKey !== undefined ? { deliveryApiKey: entry.deliveryApiKey } : {}),
+      ...(entry.managementApiKey !== undefined ? { managementApiKey: entry.managementApiKey } : {})
+    });
+    const entriesById = new Map(entries.map(entry => [entry.environmentId.trim(), entry]));
+    const s = (count: number) => (count !== 1 ? 's' : '');
+
+    if (appState.mode === 'all') {
+      // Only environments loaded from the subscription can receive keys
+      const loadedIds = new Set(environmentCredentials.map(cred => cred.environmentId));
+      const matched = [...entriesById.keys()].filter(id => loadedIds.has(id)).length;
+      const skipped = entriesById.size - matched;
+      setEnvironmentCredentials(prev => prev.map(cred => {
+        const entry = entriesById.get(cred.environmentId);
+        return entry ? applyEntry(cred, entry) : cred;
+      }));
+      setKeysFileMessage({
+        type: skipped ? 'warning' : 'success',
+        text: `Keys loaded for ${matched} environment${s(matched)}.` +
+          (skipped ? ` ${skipped} environment${s(skipped)} in the file ${skipped !== 1 ? "aren't" : "isn't"} in this subscription and ${skipped !== 1 ? 'were' : 'was'} skipped.` : '')
+      });
+    } else {
+      // Individual mode: update environments already in the list and add the others
+      const existingIds = new Set(environmentCredentials.map(cred => cred.environmentId.trim()));
+      const added = [...entriesById.keys()].filter(id => !existingIds.has(id)).length;
+      const updated = entriesById.size - added;
+      setEnvironmentCredentials(prev => {
+        // Drop the empty placeholder environment so loaded environments don't follow a blank one
+        const kept = prev.filter(cred => cred.environmentId.trim() || cred.deliveryApiKey || cred.managementApiKey || cred.subscriptionApiKey || cred.subscriptionId);
+        const next = kept.map(cred => {
+          const entry = entriesById.get(cred.environmentId.trim());
+          return entry ? applyEntry(cred, entry) : cred;
+        });
+        const keptIds = new Set(next.map(cred => cred.environmentId.trim()));
+        entriesById.forEach((entry, id) => {
+          if (!keptIds.has(id)) {
+            next.push(applyEntry({ environmentId: id, deliveryApiKey: '', managementApiKey: '', subscriptionApiKey: '', subscriptionId: '' }, entry));
+          }
+        });
+        setExpandedSections(new Set(next.map((_, index) => `env-${index}`)));
+        setExpandedInitialized(true);
+        return next;
+      });
+      setKeysFileMessage({
+        type: 'success',
+        text: `Keys loaded for ${entriesById.size} environment${s(entriesById.size)}` +
+          (added && updated ? ` (${added} added, ${updated} updated).` : added ? ` (${added} added).` : '.')
+      });
+    }
+
+    // Keys changed, so earlier validation errors no longer apply
+    setApiKeyValidationErrors({});
+    document.querySelectorAll('[id^="api-key-error-"]').forEach(element => {
+      element.classList.add('hidden');
+    });
   };
 
   // Collapse all expandable sections
@@ -491,6 +759,8 @@ function App() {
     }
 
     setIsCollectingData(true);
+    // Hide any keys file notification so it doesn't show over the loading screen
+    setKeysFileMessage(null);
     // Show full-screen loading overlay (reuse legacy loading UI)
     const loadingContainer = document.getElementById('loading-container') as HTMLElement;
     if (loadingContainer) {
@@ -529,6 +799,7 @@ function App() {
     setCollectionProgress({});
     
     const environments: EnvironmentData[] = [];
+    const subscriptionUsersCache: SubscriptionUsersCache = new Map();
     
     try {
       for (let i = 0; i < environmentCredentials.length; i++) {
@@ -553,7 +824,7 @@ function App() {
         }));
         
         const client = new KontentApiClient(cred);
-        const result = await client.collectEnvironmentData(cred.environmentId, cred);
+        const result = await client.collectEnvironmentData(cred.environmentId, cred, subscriptionUsersCache);
         
         if (result.success && result.data) {
           environments.push(result.data);
@@ -606,6 +877,29 @@ function App() {
     }
   };
 
+  // Export values for each metric, in column order. null means unavailable (same rules as the UI):
+  // the required API key wasn't provided, or, for content items, the request failed.
+  const getExportMetrics = (env: EnvironmentData): Record<string, number | null> => {
+    const { delivery, management, subscription } = env.apiKeysAvailable;
+    const ifAvailable = (available: boolean, value: number | null) => (available ? value : null);
+    return {
+      activeLanguages: ifAvailable(delivery, env.metrics.languages),
+      activeUsers: ifAvailable(subscription, env.metrics.activeUsers),
+      assetCount: ifAvailable(management, env.metrics.assetCount),
+      assetStorageMB: ifAvailable(management, Math.round(env.metrics.assetStorageSize / 1000000 * 100) / 100),
+      collections: ifAvailable(management, env.metrics.collections),
+      contentItems: ifAvailable(management, env.metrics.literalContentItems),
+      contentItemsAllLanguages: ifAvailable(delivery, env.metrics.contentItems),
+      contentTypes: ifAvailable(delivery, env.metrics.contentTypes),
+      customRoles: ifAvailable(management, env.metrics.customRoles),
+      spaces: ifAvailable(management, env.metrics.spaces)
+    };
+  };
+
+  // Excel and CSV show "Unavailable" in place of null
+  const getExportMetricCells = (env: EnvironmentData): (number | string)[] =>
+    Object.values(getExportMetrics(env)).map(value => value ?? 'Unavailable');
+
   const exportUsageToExcel = (environments: EnvironmentData[]) => {
     // Check if any environments have names in projectEnvMap (all environments mode)
     const hasEnvironmentNames = environments.some(env => projectEnvMap[env.environmentId]?.envName);
@@ -625,26 +919,16 @@ function App() {
     
     const headers = hasEnvironmentNames
       ? hasProjectInfo
-        ? ['Project name', 'Environment name', 'Environment ID', 'Active languages', 'Active users', 'Asset count', 'Asset storage (MB)', 'Collections', 'Content items (all languages)', 'Content types', 'Custom roles', 'Spaces']
-        : ['Environment ID', 'Environment name', 'Active languages', 'Active users', 'Asset count', 'Asset storage (MB)', 'Collections', 'Content items (all languages)', 'Content types', 'Custom roles', 'Spaces']
-      : ['Environment ID', 'Active languages', 'Active users', 'Asset count', 'Asset storage (MB)', 'Collections', 'Content items (all languages)', 'Content types', 'Custom roles', 'Spaces'];
+        ? ['Project name', 'Environment name', 'Environment ID', 'Active languages', 'Active users', 'Asset count', 'Asset storage (MB)', 'Collections', 'Content items', 'Content items (all languages)', 'Content types', 'Custom roles', 'Spaces']
+        : ['Environment ID', 'Environment name', 'Active languages', 'Active users', 'Asset count', 'Asset storage (MB)', 'Collections', 'Content items', 'Content items (all languages)', 'Content types', 'Custom roles', 'Spaces']
+      : ['Environment ID', 'Active languages', 'Active users', 'Asset count', 'Asset storage (MB)', 'Collections', 'Content items', 'Content items (all languages)', 'Content types', 'Custom roles', 'Spaces'];
     
     const wsData = [
       headers,
       ...sortedEnvironments.map(env => {
         const projectName = projectEnvMap[env.environmentId]?.project || '';
         const envName = projectEnvMap[env.environmentId]?.envName || env.name;
-        const metrics = [
-          env.metrics.languages,
-          env.metrics.activeUsers,
-          env.metrics.assetCount,
-          Math.round(env.metrics.assetStorageSize / 1000000 * 100) / 100,
-          env.metrics.collections,
-          env.metrics.contentItems,
-          env.metrics.contentTypes,
-          env.metrics.customRoles,
-          env.metrics.spaces
-        ];
+        const metrics = getExportMetricCells(env);
         // Build row based on what columns we have
         if (hasProjectInfo && hasEnvironmentNames) {
           return [projectName, envName, env.environmentId, ...metrics];
@@ -703,17 +987,7 @@ function App() {
           envData.environmentName = projectEnvMap[env.environmentId]?.envName || env.name;
         }
         
-        envData.metrics = {
-          activeLanguages: env.metrics.languages,
-          activeUsers: env.metrics.activeUsers,
-          assetCount: env.metrics.assetCount,
-          assetStorageMB: Math.round(env.metrics.assetStorageSize / 1000000 * 100) / 100,
-          collections: env.metrics.collections,
-          contentItemsAllLanguages: env.metrics.contentItems,
-          contentTypes: env.metrics.contentTypes,
-          customRoles: env.metrics.customRoles,
-          spaces: env.metrics.spaces
-        };
+        envData.metrics = getExportMetrics(env);
         
         projectsMap[projectId].environments.push(envData);
       });
@@ -748,17 +1022,7 @@ function App() {
           if (hasEnvironmentNames) {
             envData.environmentName = projectEnvMap[env.environmentId]?.envName || env.name;
           }
-          envData.metrics = {
-            activeLanguages: env.metrics.languages,
-            activeUsers: env.metrics.activeUsers,
-            assetCount: env.metrics.assetCount,
-            assetStorageMB: Math.round(env.metrics.assetStorageSize / 1000000 * 100) / 100,
-            collections: env.metrics.collections,
-            contentItemsAllLanguages: env.metrics.contentItems,
-            contentTypes: env.metrics.contentTypes,
-            customRoles: env.metrics.customRoles,
-            spaces: env.metrics.spaces
-          };
+          envData.metrics = getExportMetrics(env);
           return envData;
         })
       };
@@ -771,6 +1035,12 @@ function App() {
     a.download = `kontent-ai-usage-insights-${new Date().toISOString().split('T')[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  // Quote a CSV field only when it contains a comma, double quote or line break (e.g. project or environment names)
+  const toCsvField = (value: string | number): string => {
+    const text = String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
 
   const exportUsageToCsv = (environments: EnvironmentData[]) => {
@@ -792,26 +1062,16 @@ function App() {
     
     const header = hasEnvironmentNames
       ? hasProjectInfo
-        ? 'Project name,Environment name,Environment ID,Active languages,Active users,Asset count,Asset storage (MB),Collections,Content items (all languages),Content types,Custom roles,Spaces'
-        : 'Environment ID,Environment name,Active languages,Active users,Asset count,Asset storage (MB),Collections,Content items (all languages),Content types,Custom roles,Spaces'
-      : 'Environment ID,Active languages,Active users,Asset count,Asset storage (MB),Collections,Content items (all languages),Content types,Custom roles,Spaces';
+        ? 'Project name,Environment name,Environment ID,Active languages,Active users,Asset count,Asset storage (MB),Collections,Content items,Content items (all languages),Content types,Custom roles,Spaces'
+        : 'Environment ID,Environment name,Active languages,Active users,Asset count,Asset storage (MB),Collections,Content items,Content items (all languages),Content types,Custom roles,Spaces'
+      : 'Environment ID,Active languages,Active users,Asset count,Asset storage (MB),Collections,Content items,Content items (all languages),Content types,Custom roles,Spaces';
     
     const csvData = [
       header,
       ...sortedEnvironments.map(env => {
         const projectName = projectEnvMap[env.environmentId]?.project || '';
         const envName = projectEnvMap[env.environmentId]?.envName || env.name;
-        const metrics = [
-          env.metrics.languages,
-          env.metrics.activeUsers,
-          env.metrics.assetCount,
-          Math.round(env.metrics.assetStorageSize / 1000000 * 100) / 100,
-          env.metrics.collections,
-          env.metrics.contentItems,
-          env.metrics.contentTypes,
-          env.metrics.customRoles,
-          env.metrics.spaces
-        ];
+        const metrics = getExportMetricCells(env);
         // Build row based on what columns we have
         let row;
         if (hasProjectInfo && hasEnvironmentNames) {
@@ -821,7 +1081,7 @@ function App() {
         } else {
           row = [env.environmentId, ...metrics];
         }
-        return row.join(',');
+        return row.map(toCsvField).join(',');
       })
     ].join('\n');
     
@@ -847,6 +1107,24 @@ function App() {
         Unavailable
       </span>
     );
+  };
+
+  const contentItemsTooltip = "Counts each content item once, however many languages it's in. Items whose variants all exist only in deactivated languages can't be retrieved via the Management API, so they aren't included here. Your official usage report may be slightly higher as a result.";
+  const contentItemsAllLanguagesTooltip = "Counts each language variant separately: an item in 3 languages counts as 3. Only active languages are counted, as in the official usage report.";
+
+  // Content items can also be unavailable when a Management API key was provided but the request failed
+  const formatContentItemsValue = (env: EnvironmentData) => {
+    if (env.apiKeysAvailable.management && env.metrics.literalContentItems === null) {
+      return (
+        <span
+          className="text-gray-400 italic cursor-help"
+          title="Failed to retrieve content items from the Management API"
+        >
+          Unavailable
+        </span>
+      );
+    }
+    return formatMetricValue(env.metrics.literalContentItems ?? 0, 'Management API key', env.apiKeysAvailable.management);
   };
 
 
@@ -1056,6 +1334,81 @@ function App() {
 
     return (
     <>
+      {keysDialog && (
+        <div
+          className='fixed inset-0 z-40 flex items-center justify-center p-4'
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.4)' }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget && !isKeysDialogBusy) closeKeysDialog(); }}
+        >
+          <form
+            role='dialog'
+            aria-modal='true'
+            aria-labelledby='keys-dialog-title'
+            aria-describedby='keys-dialog-description'
+            className='bg-white rounded-2xl w-full p-6'
+            style={{ maxWidth: '560px', boxShadow: '0 10px 25px rgba(0, 0, 0, 0.2)' }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (keysDialog.mode === 'save') saveKeysToFile();
+              else loadKeysFromFile();
+            }}
+          >
+            <div className='flex items-start justify-between gap-4 mb-4'>
+              <h2 id='keys-dialog-title' className='text-2xl font-bold'>
+                {keysDialog.mode === 'save' ? 'Save keys to file' : 'Load keys from file'}
+              </h2>
+              <button
+                type='button'
+                onClick={closeKeysDialog}
+                aria-label='Close'
+                className='cursor-pointer text-gray-700 hover:text-black'
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" style={{ width: '24px', height: '24px' }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <p id='keys-dialog-description' className='text-gray-700 mb-6'>
+              {keysDialog.mode === 'save'
+                ? `Your keys will be encrypted with this passphrase (at least ${MIN_PASSPHRASE_LENGTH} characters). You'll need it to load the file, and it can't be recovered if you forget it.`
+                : 'Enter the passphrase this file was saved with.'}
+            </p>
+            <div className='space-y-4 mb-6'>
+              <PassphraseInput
+                id='keys-passphrase'
+                label='Passphrase'
+                value={passphrase}
+                onChange={(value) => { setPassphrase(value); setKeysDialogError(null); }}
+                inputRef={passphraseInputRef}
+                autoComplete={keysDialog.mode === 'save' ? 'new-password' : 'current-password'}
+              />
+              {keysDialog.mode === 'save' && (
+                <PassphraseInput
+                  id='keys-passphrase-confirmation'
+                  label='Confirm passphrase'
+                  value={passphraseConfirmation}
+                  onChange={(value) => { setPassphraseConfirmation(value); setKeysDialogError(null); }}
+                  autoComplete='new-password'
+                />
+              )}
+              {keysDialogError && (
+                <p role='alert' className='text-sm text-(--red)'>{keysDialogError}</p>
+              )}
+            </div>
+            <div className='flex flex-wrap justify-end gap-2'>
+              <button type='button' onClick={closeKeysDialog} className='btn back-btn'>
+                Cancel
+              </button>
+              <button type='submit' disabled={isKeysDialogBusy} className='btn continue-btn'>
+                {keysDialog.mode === 'save'
+                  ? (isKeysDialogBusy ? 'Encrypting...' : 'Save file')
+                  : (isKeysDialogBusy ? 'Decrypting...' : 'Load keys')}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {['mode-selection','credentials','data-collection','results'].includes(appState.ui.currentStep) && (
         <div id='loading-container' className='basis-full fixed bg-white z-30 top-0 bottom-0 left-0 right-0 flex'>
           <div className='basis-full flex flex-col items-center justify-center'>
@@ -1263,11 +1616,11 @@ function App() {
               <ul className='list-disc pl-6 space-y-1 text-sm text-gray-700'>
                 <li>
                   <span className='font-medium'>Delivery Preview API key</span>: Used for Delivery API requests. Provides counts for
-                  content items, content types, and languages.
+                  active languages, content items (all languages), and content types.
                 </li>
                 <li>
                   <span className='font-medium'>Management API key</span>: Used for Management API requests. Provides
-                  asset metrics (asset count and asset storage), collections, custom roles, and spaces.
+                  asset metrics (asset count and asset storage), collections, content items, custom roles, and spaces.
                 </li>
                 <li>
                   <span className='font-medium'>Subscription ID + Subscription API key</span>: Used for Subscription API
@@ -1479,23 +1832,141 @@ function App() {
 
           {(appState.mode === 'individual' || (appState.mode === 'all' && Object.keys(projectEnvMap).length > 0)) && (
             <div className='basis-full mb-6'>
-              <div className='flex justify-between items-center mb-6'>
-                <h2 className='text-lg font-semibold'>
-                  {appState.mode === 'all' ? 'Projects & environments' : 'Environments'}
-                </h2>
-                <div className='flex items-center gap-2'>
+              <div className='mb-6'>
+                <div className='flex justify-between items-center gap-4'>
+                  <h2 className='text-lg font-semibold min-w-0'>
+                    {appState.mode === 'all' ? 'Projects & environments' : 'Environments'}
+                  </h2>
+                  <div className='relative flex-shrink-0' ref={keysDropdownRef}>
+                    <button
+                      ref={keysButtonRef}
+                      type='button'
+                      onClick={() => { setKeysFileMessage(null); setIsKeysDropdownOpen(!isKeysDropdownOpen); }}
+                      className='btn back-btn flex items-center gap-2'
+                      aria-haspopup='menu'
+                      aria-expanded={isKeysDropdownOpen}
+                    >
+                      Keys file
+                      <svg 
+                        xmlns="http://www.w3.org/2000/svg" 
+                        fill="none" 
+                        viewBox="0 0 24 24" 
+                        strokeWidth={1.5} 
+                        stroke="currentColor" 
+                        style={{ 
+                          width: '16px', 
+                          height: '16px',
+                          transform: isKeysDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                          transition: 'transform 0.2s ease'
+                        }}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+                      </svg>
+                    </button>
+                    {isKeysDropdownOpen && (
+                      <div 
+                        className='absolute right-0 mt-2 bg-white border border-gray-300 rounded-lg z-50 overflow-hidden'
+                        style={{ 
+                          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                          borderColor: 'var(--color-gray-300)',
+                          padding: '4px',
+                          minWidth: '160px'
+                        }}
+                        role='menu'
+                      >
+                        <button
+                          type='button'
+                          role='menuitem'
+                          onClick={() => {
+                            setIsKeysDropdownOpen(false);
+                            keysFileInputRef.current?.click();
+                          }}
+                          className='w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-[rgb(243,243,243)] transition-colors cursor-pointer rounded whitespace-nowrap'
+                          style={{ fontSize: '14px' }}
+                        >
+                          Load from file
+                        </button>
+                        <button
+                          type='button'
+                          role='menuitem'
+                          onClick={() => {
+                            setIsKeysDropdownOpen(false);
+                            setKeysFileMessage(null);
+                            openKeysDialog({ mode: 'save' });
+                          }}
+                          disabled={!hasKeysToSave}
+                          title={hasKeysToSave ? undefined : 'Enter at least one Delivery Preview or Management API key first'}
+                          className='w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-[rgb(243,243,243)] transition-colors cursor-pointer rounded whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent'
+                          style={{ fontSize: '14px' }}
+                        >
+                          Save to file
+                        </button>
+                      </div>
+                    )}
+                    {keysFileMessage && (
+                      <div
+                        role={keysFileMessage.type === 'success' ? 'status' : 'alert'}
+                        className='absolute right-0 mt-2 z-40 flex items-stretch rounded-lg overflow-hidden bg-white border border-gray-300'
+                        style={{ width: 'max-content', maxWidth: 'min(320px, calc(100vw - 2rem))', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}
+                      >
+                        <span
+                          className={`${keysFileMessage.type === 'warning' ? 'text-black' : 'text-white'} px-2 flex items-center justify-center flex-shrink-0`}
+                          style={{ minWidth: '32px', backgroundColor: keysFileMessage.type === 'success' ? 'var(--green)' : keysFileMessage.type === 'warning' ? 'var(--warning-yellow)' : 'var(--red)' }}
+                          aria-hidden='true'
+                        >
+                          {keysFileMessage.type === 'success' ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: '18px', height: '18px' }}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                            </svg>
+                          ) : keysFileMessage.type === 'warning' ? (
+                            <span className='font-bold' style={{ fontSize: '16px', lineHeight: 1 }}>!</span>
+                          ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" style={{ width: '18px', height: '18px' }}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                            </svg>
+                          )}
+                        </span>
+                        <span className='text-sm text-black px-3 py-2'>{keysFileMessage.text}</span>
+                        <button
+                          type='button'
+                          onClick={() => setKeysFileMessage(null)}
+                          aria-label='Dismiss'
+                          className='px-2 text-gray-500 hover:text-black cursor-pointer flex-shrink-0'
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" style={{ width: '16px', height: '16px' }}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <input
+                    ref={keysFileInputRef}
+                    type='file'
+                    accept='application/json,.json'
+                    className='hidden'
+                    aria-label='Keys file'
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) openKeysFile(file);
+                      // Allow loading the same file again
+                      e.target.value = '';
+                    }}
+                  />
+                </div>
+                <div className='flex items-center gap-2 mt-2'>
                   <button 
                     onClick={collapseAllSections}
                     className='text-sm text-gray-500 hover:text-gray-700 cursor-pointer'
                   >
-                    Collapse All
+                    Collapse all
                   </button>
                   <span className='text-gray-400'>|</span>
                   <button 
                     onClick={expandAllSections}
                     className='text-sm text-gray-500 hover:text-gray-700 cursor-pointer'
                   >
-                    Expand All
+                    Expand all
                   </button>
                 </div>
               </div>
@@ -1631,7 +2102,7 @@ function App() {
                                   <span 
                                     className='tooltip-icon relative'
                                     style={{ width: '16px', height: '16px', fontSize: '12px', marginLeft: '0.25rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: '1' }}
-                                    title={sdkResponse ? "To find your Management API key, go to Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' and 'Read assets' permissions selected in the 'Permissions' section." : "To find your Management API key, go to Kontent.ai > Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' and 'Read assets' permissions selected in the 'Permissions' section."}
+                                    title={sdkResponse ? "To find your Management API key, go to Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' and 'Read assets' permissions selected in the 'Permissions' section. The tool only reads data, so no other permissions are needed. We recommend using a key with only these two permissions." : "To find your Management API key, go to Kontent.ai > Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' and 'Read assets' permissions selected in the 'Permissions' section. The tool only reads data, so no other permissions are needed. We recommend using a key with only these two permissions."}
                                   >
                                     ⓘ
                                   </span>
@@ -1802,7 +2273,7 @@ function App() {
                           <span 
                             className='tooltip-icon relative'
                             style={{ width: '16px', height: '16px', fontSize: '12px', marginLeft: '0.25rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: '1' }}
-                            title={sdkResponse ? "To find your Management API key, go to Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' and 'Read assets' permissions selected in the 'Permissions' section." : "To find your Management API key, go to Kontent.ai > Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' and 'Read assets' permissions selected in the 'Permissions' section."}
+                            title={sdkResponse ? "To find your Management API key, go to Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' and 'Read assets' permissions selected in the 'Permissions' section. The tool only reads data, so no other permissions are needed. We recommend using a key with only these two permissions." : "To find your Management API key, go to Kontent.ai > Project settings > API keys > Management API keys. Then, choose a Management API key with the 'Read content' and 'Read assets' permissions selected in the 'Permissions' section. The tool only reads data, so no other permissions are needed. We recommend using a key with only these two permissions."}
                           >
                             ⓘ
                           </span>
@@ -2069,25 +2540,25 @@ function App() {
 
           <hr className='assets-divider mb-6' />
           <div className='basis-full flex-grow'>
-            <div className='flex justify-between items-center mb-6'>
+            <div className='mb-6'>
               <h2 className='text-lg font-semibold'>
                 {appState.mode === 'all' ? 'Projects & environments' : 'Environments'}
               </h2>
               {appState.mode === 'all' && (
-                <div className='flex items-center gap-2'>
-                <button
+                <div className='flex items-center gap-2 mt-2'>
+                  <button
                     onClick={collapseAllSections}
                     className='text-sm text-gray-500 hover:text-gray-700 cursor-pointer'
                   >
-                    Collapse All
+                    Collapse all
                   </button>
                   <span className='text-gray-400'>|</span>
                   <button 
                     onClick={expandAllSections}
                     className='text-sm text-gray-500 hover:text-gray-700 cursor-pointer'
                   >
-                    Expand All
-                </button>
+                    Expand all
+                  </button>
                 </div>
               )}
             </div>
@@ -2140,25 +2611,25 @@ function App() {
                               <div className='font-mono font-bold text-sm mb-4 break-all'>{env.environmentId}</div>
                               <div className='space-y-2'>
                                 <div className='flex justify-between'>
-                                  <span className='text-gray-600'>Active languages:</span>
+                                  <span className='text-gray-600'>Active languages</span>
                                   <span className='font-medium'>
                                     {formatMetricValue(env.metrics.languages, 'Delivery Preview API key', env.apiKeysAvailable.delivery)}
                                   </span>
                                 </div>
                                 <div className='flex justify-between'>
-                                  <span className='text-gray-600'>Active users:</span>
+                                  <span className='text-gray-600'>Active users</span>
                                   <span className='font-medium'>
                                     {formatMetricValue(env.metrics.activeUsers, 'Subscription API key', env.apiKeysAvailable.subscription)}
                                   </span>
                                 </div>
                                 <div className='flex justify-between'>
-                                  <span className='text-gray-600'>Asset count:</span>
+                                  <span className='text-gray-600'>Asset count</span>
                                   <span className='font-medium'>
                                     {formatMetricValue(env.metrics.assetCount, 'Management API key', env.apiKeysAvailable.management)}
                                   </span>
                                 </div>
                                 <div className='flex justify-between'>
-                                  <span className='text-gray-600'>Asset storage:</span>
+                                  <span className='text-gray-600'>Asset storage</span>
                                   <span className='font-medium'>
                                     {env.apiKeysAvailable.management ? (
                                       `${Math.round(env.metrics.assetStorageSize / 1000000 * 100) / 100} MB`
@@ -2173,31 +2644,55 @@ function App() {
                                   </span>
                                 </div>
                                 <div className='flex justify-between'>
-                                  <span className='text-gray-600'>Collections:</span>
+                                  <span className='text-gray-600'>Collections</span>
                                   <span className='font-medium'>
                                     {formatMetricValue(env.metrics.collections, 'Management API key', env.apiKeysAvailable.management)}
                                   </span>
                                 </div>
                                 <div className='flex justify-between'>
-                                  <span className='text-gray-600'>Content items (all languages):</span>
+                                  <span className='text-gray-600 flex items-center'>
+                                    Content items
+                                    <span
+                                      className='tooltip-icon relative'
+                                      style={{ width: '16px', height: '16px', fontSize: '12px', marginLeft: '0.25rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: '1' }}
+                                      title={contentItemsTooltip}
+                                    >
+                                      ⓘ
+                                    </span>
+                                  </span>
+                                  <span className='font-medium'>
+                                    {formatContentItemsValue(env)}
+                                  </span>
+                                </div>
+                                <div className='flex justify-between'>
+                                  <span className='text-gray-600 flex items-center'>
+                                    Content items (all languages)
+                                    <span
+                                      className='tooltip-icon relative'
+                                      style={{ width: '16px', height: '16px', fontSize: '12px', marginLeft: '0.25rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: '1' }}
+                                      title={contentItemsAllLanguagesTooltip}
+                                    >
+                                      ⓘ
+                                    </span>
+                                  </span>
                                   <span className='font-medium'>
                                     {formatMetricValue(env.metrics.contentItems, 'Delivery Preview API key', env.apiKeysAvailable.delivery)}
                                   </span>
                                 </div>
                                 <div className='flex justify-between'>
-                                  <span className='text-gray-600'>Content types:</span>
+                                  <span className='text-gray-600'>Content types</span>
                                   <span className='font-medium'>
                                     {formatMetricValue(env.metrics.contentTypes, 'Delivery Preview API key', env.apiKeysAvailable.delivery)}
                                   </span>
                                 </div>
                                 <div className='flex justify-between'>
-                                  <span className='text-gray-600'>Custom roles:</span>
+                                  <span className='text-gray-600'>Custom roles</span>
                                   <span className='font-medium'>
                                     {formatMetricValue(env.metrics.customRoles, 'Management API key', env.apiKeysAvailable.management)}
                                   </span>
                                 </div>
                                 <div className='flex justify-between'>
-                                  <span className='text-gray-600'>Spaces:</span>
+                                  <span className='text-gray-600'>Spaces</span>
                                   <span className='font-medium'>
                                     {formatMetricValue(env.metrics.spaces, 'Management API key', env.apiKeysAvailable.management)}
                                   </span>
@@ -2219,25 +2714,25 @@ function App() {
                     <div className='font-mono font-bold text-sm mt-1 mb-4 break-all'>{env.environmentId}</div>
                     <div className='space-y-2'>
                       <div className='flex justify-between'>
-                        <span className='text-gray-600'>Active languages:</span>
+                        <span className='text-gray-600'>Active languages</span>
                         <span className='font-medium'>
                           {formatMetricValue(env.metrics.languages, 'Delivery Preview API key', env.apiKeysAvailable.delivery)}
                         </span>
                       </div>
                       <div className='flex justify-between'>
-                        <span className='text-gray-600'>Active users:</span>
+                        <span className='text-gray-600'>Active users</span>
                         <span className='font-medium'>
                           {formatMetricValue(env.metrics.activeUsers, 'Subscription API key', env.apiKeysAvailable.subscription)}
                         </span>
                       </div>
                       <div className='flex justify-between'>
-                        <span className='text-gray-600'>Asset count:</span>
+                        <span className='text-gray-600'>Asset count</span>
                         <span className='font-medium'>
                           {formatMetricValue(env.metrics.assetCount, 'Management API key', env.apiKeysAvailable.management)}
                         </span>
                       </div>
                       <div className='flex justify-between'>
-                        <span className='text-gray-600'>Asset storage:</span>
+                        <span className='text-gray-600'>Asset storage</span>
                         <span className='font-medium'>
                           {env.apiKeysAvailable.management ? (
                           `${Math.round(env.metrics.assetStorageSize / 1000000 * 100) / 100} MB`
@@ -2252,31 +2747,55 @@ function App() {
                         </span>
                       </div>
                       <div className='flex justify-between'>
-                        <span className='text-gray-600'>Collections:</span>
+                        <span className='text-gray-600'>Collections</span>
                         <span className='font-medium'>
                           {formatMetricValue(env.metrics.collections, 'Management API key', env.apiKeysAvailable.management)}
                         </span>
                       </div>
                       <div className='flex justify-between'>
-                        <span className='text-gray-600'>Content items (all languages):</span>
+                        <span className='text-gray-600 flex items-center'>
+                          Content items
+                          <span
+                            className='tooltip-icon relative'
+                            style={{ width: '16px', height: '16px', fontSize: '12px', marginLeft: '0.25rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: '1' }}
+                            title={contentItemsTooltip}
+                          >
+                            ⓘ
+                          </span>
+                        </span>
+                        <span className='font-medium'>
+                          {formatContentItemsValue(env)}
+                        </span>
+                      </div>
+                      <div className='flex justify-between'>
+                        <span className='text-gray-600 flex items-center'>
+                          Content items (all languages)
+                          <span
+                            className='tooltip-icon relative'
+                            style={{ width: '16px', height: '16px', fontSize: '12px', marginLeft: '0.25rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: '1' }}
+                            title={contentItemsAllLanguagesTooltip}
+                          >
+                            ⓘ
+                          </span>
+                        </span>
                         <span className='font-medium'>
                           {formatMetricValue(env.metrics.contentItems, 'Delivery Preview API key', env.apiKeysAvailable.delivery)}
                         </span>
                       </div>
                       <div className='flex justify-between'>
-                        <span className='text-gray-600'>Content types:</span>
+                        <span className='text-gray-600'>Content types</span>
                         <span className='font-medium'>
                           {formatMetricValue(env.metrics.contentTypes, 'Delivery Preview API key', env.apiKeysAvailable.delivery)}
                         </span>
                       </div>
                       <div className='flex justify-between'>
-                        <span className='text-gray-600'>Custom roles:</span>
+                        <span className='text-gray-600'>Custom roles</span>
                         <span className='font-medium'>
                           {formatMetricValue(env.metrics.customRoles, 'Management API key', env.apiKeysAvailable.management)}
                         </span>
                       </div>
                       <div className='flex justify-between'>
-                        <span className='text-gray-600'>Spaces:</span>
+                        <span className='text-gray-600'>Spaces</span>
                         <span className='font-medium'>
                           {formatMetricValue(env.metrics.spaces, 'Management API key', env.apiKeysAvailable.management)}
                         </span>
