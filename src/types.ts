@@ -24,7 +24,7 @@ export interface KeysFilePayload {
   environments: KeysFileEntry[];
 }
 
-// Keys file as stored on disk: the payload is encrypted with a key derived from the user's passphrase
+// Keys file as stored on disk: the payload is encrypted with a key derived from the user's password
 export interface EncryptedKeysFile {
   type: 'kontent-ai-usage-insights-keys';
   version: 2;

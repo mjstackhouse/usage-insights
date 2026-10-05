@@ -60,10 +60,10 @@ The tool only reads data. For Management API keys, only the **Read content** and
 
 Entering keys for every project can take a while, so you can save the keys you've entered to a file and load them again on your next run. This works in both modes:
 
-- **Keys file > Save to file** (above the environment list) asks for a passphrase and downloads an encrypted file with the Delivery Preview and Management API keys of each environment. Subscription credentials aren't included.
-- **Keys file > Load from file** asks for the file's passphrase and fills in its keys, matching environments by their IDs. Keys from the file replace keys already entered for the same environment. In "Individual environments" mode, environments from the file that aren't in the list yet are added. In "All environments" mode, environments that aren't in the loaded subscription are skipped.
+- **Keys file > Save to file** (above the environment list) asks for a password and downloads an encrypted file with the Delivery Preview and Management API keys of each environment. Subscription credentials aren't included.
+- **Keys file > Load from file** asks for the file's password and fills in its keys, matching environments by their IDs. Keys from the file replace keys already entered for the same environment. In "Individual environments" mode, environments from the file that aren't in the list yet are added. In "All environments" mode, environments that aren't in the loaded subscription are skipped.
 
-The file is encrypted in your browser with a key derived from your passphrase (AES-GCM, PBKDF2-SHA-256), and the passphrase isn't stored anywhere. Without it, the file can't be read, so if you forget it, you'll need to enter your keys again and save a new file.
+The file is encrypted in your browser with a key derived from your password (AES-GCM, PBKDF2-SHA-256), and the password isn't stored anywhere. Without it, the file can't be read, so if you forget it, you'll need to enter your keys again and save a new file.
 
 ### Kontent.ai Custom App
 
