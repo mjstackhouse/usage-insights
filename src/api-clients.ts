@@ -19,6 +19,36 @@ interface SubscriptionUserRecord {
   projects?: { environments?: { id: string; is_user_active?: boolean }[] }[];
 }
 
+// The Management API allows 400 requests per minute per environment, shared with the customer's own
+// integrations. Keep the tool well below that: at most about 3 requests per second.
+const MANAGEMENT_API_MIN_INTERVAL_MS = 334;
+let lastManagementRequestAt = 0;
+
+// Waits until enough time has passed since the previous Management API request
+const paceManagementRequest = async (): Promise<void> => {
+  const wait = lastManagementRequestAt + MANAGEMENT_API_MIN_INTERVAL_MS - Date.now();
+  if (wait > 0) {
+    await new Promise(resolve => setTimeout(resolve, wait));
+  }
+  lastManagementRequestAt = Date.now();
+};
+
+// Fetches every page of a Management API listing, pacing each page request.
+// (The SDK's own delayBetweenRequests waits after each response, which is slower than needed.)
+const listAllPaced = async <TItem>(
+  getPage: (continuationToken?: string) => Promise<{ data: { items: TItem[]; pagination: { continuationToken: string | null } } }>
+): Promise<TItem[]> => {
+  const items: TItem[] = [];
+  let continuationToken: string | undefined;
+  do {
+    await paceManagementRequest();
+    const response = await getPage(continuationToken);
+    items.push(...response.data.items);
+    continuationToken = response.data.pagination.continuationToken || undefined;
+  } while (continuationToken);
+  return items;
+};
+
 // Subscription users downloaded during one data collection run, keyed by Subscription ID and API key
 export type SubscriptionUsersCache = Map<string, Promise<SubscriptionUserRecord[]>>;
 
@@ -328,16 +358,13 @@ export class KontentApiClient {
       const metrics: Partial<UsageMetrics> = {};
 
       // Get assets and storage size - use toAllPromise to handle pagination
-      const assetsResponse = await client.listAssets().toAllPromise();
-      metrics.assetCount = assetsResponse.data.items.length;
-      let assetSizeTotal = 0;
-      for (const asset of assetsResponse.data.items) {
-        assetSizeTotal+=asset.size || 0;
-      }
-      metrics.assetStorageSize = assetsResponse.data.items.reduce((total, asset) => total + (asset.size || 0), 0);
+      const assets = await listAllPaced(token => (token ? client.listAssets().xContinuationToken(token) : client.listAssets()).toPromise());
+      metrics.assetCount = assets.length;
+      metrics.assetStorageSize = assets.reduce((total, asset) => total + (asset.size || 0), 0);
 
       // Get collections
       try {
+        await paceManagementRequest();
         const collectionsResponse = await client.listCollections().toPromise();
         metrics.collections = collectionsResponse.data.collections.length;
       } catch (error) {
@@ -347,6 +374,7 @@ export class KontentApiClient {
 
       // Get custom roles (excluding the default "Project manager" role)
       try {
+        await paceManagementRequest();
         const rolesResponse = await client.listRoles().toPromise();
         // Filter out the default "Project manager" role
         const customRoles = rolesResponse.data.roles.filter(role => 
@@ -360,6 +388,7 @@ export class KontentApiClient {
 
       // Get spaces
       try {
+        await paceManagementRequest();
         const spacesResponse = await client.listSpaces().toPromise();
         metrics.spaces = spacesResponse.data.length;
       } catch (error) {
@@ -388,8 +417,8 @@ export class KontentApiClient {
         apiKey
       });
 
-      const itemsResponse = await client.listContentItems().toAllPromise();
-      return itemsResponse.data.items.length;
+      const items = await listAllPaced(token => (token ? client.listContentItems().xContinuationToken(token) : client.listContentItems()).toPromise());
+      return items.length;
     } catch (error) {
       console.warn('Failed to get content items from Management API:', error);
       return null;
@@ -501,6 +530,7 @@ export class KontentApiClient {
       });
 
       // Test with a simple request
+      await paceManagementRequest();
       await client.listAssets().toPromise();
       return { success: true, data: true };
     } catch (error: any) {
