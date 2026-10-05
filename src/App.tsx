@@ -13,10 +13,10 @@ import { KontentApiClient, SubscriptionApiClient } from './api-clients';
 import type { SubscriptionUsersCache } from './api-clients';
 import { decryptKeysFile, encryptKeysFile, parseEncryptedKeysFile } from './keys-file-crypto';
 
-const MIN_PASSPHRASE_LENGTH = 8;
+const MIN_PASSWORD_LENGTH = 8;
 
-// Password field with a show/hide toggle, used for keys file passphrases
-function PassphraseInput({ id, label, value, onChange, inputRef, autoComplete }: {
+// Password field with a show/hide toggle, used for keys file passwords
+function PasswordInput({ id, label, value, onChange, inputRef, autoComplete }: {
   id: string;
   label: string;
   value: string;
@@ -41,7 +41,7 @@ function PassphraseInput({ id, label, value, onChange, inputRef, autoComplete }:
         <button
           type='button'
           onClick={() => setIsVisible(!isVisible)}
-          aria-label={isVisible ? 'Hide passphrase' : 'Show passphrase'}
+          aria-label={isVisible ? 'Hide password' : 'Show password'}
           aria-pressed={isVisible}
           className='absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 cursor-pointer'
         >
@@ -101,10 +101,10 @@ function App() {
   const exportDropdownRef = useRef<HTMLDivElement>(null);
   const exportButtonRef = useRef<HTMLButtonElement>(null);
   const [exportDropdownWidth, setExportDropdownWidth] = useState<number | undefined>(undefined);
-  // Keys file dialog: saving asks for a new passphrase, loading for the passphrase of the chosen file
+  // Keys file dialog: saving asks for a new password, loading for the password of the chosen file
   const [keysDialog, setKeysDialog] = useState<{ mode: 'save' } | { mode: 'load'; file: EncryptedKeysFile } | null>(null);
-  const [passphrase, setPassphrase] = useState('');
-  const [passphraseConfirmation, setPassphraseConfirmation] = useState('');
+  const [password, setPassword] = useState('');
+  const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [keysDialogError, setKeysDialogError] = useState<string | null>(null);
   const [isKeysDialogBusy, setIsKeysDialogBusy] = useState(false);
   const [keysFileMessage, setKeysFileMessage] = useState<{ type: 'success' | 'warning' | 'error'; text: string } | null>(null);
@@ -112,7 +112,7 @@ function App() {
   const [isKeysDropdownOpen, setIsKeysDropdownOpen] = useState(false);
   const keysDropdownRef = useRef<HTMLDivElement>(null);
   const keysButtonRef = useRef<HTMLButtonElement>(null);
-  const passphraseInputRef = useRef<HTMLInputElement>(null);
+  const passwordInputRef = useRef<HTMLInputElement>(null);
 
   // New functions for usage insights
   // Prevent body scrolling when loading overlay is visible and scroll to top
@@ -215,10 +215,10 @@ function App() {
     };
   }, [isExportDropdownOpen]);
 
-  // Keys file dialog: focus the passphrase field when it opens, close it with Escape
+  // Keys file dialog: focus the password field when it opens, close it with Escape
   useEffect(() => {
     if (!keysDialog) return;
-    passphraseInputRef.current?.focus();
+    passwordInputRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') closeKeysDialog();
     };
@@ -552,28 +552,28 @@ function App() {
   );
 
   const openKeysDialog = (dialog: { mode: 'save' } | { mode: 'load'; file: EncryptedKeysFile }) => {
-    setPassphrase('');
-    setPassphraseConfirmation('');
+    setPassword('');
+    setPasswordConfirmation('');
     setKeysDialogError(null);
     setKeysDialog(dialog);
   };
 
   const closeKeysDialog = () => {
-    // Don't keep passphrases around once the dialog is closed
-    setPassphrase('');
-    setPassphraseConfirmation('');
+    // Don't keep passwords around once the dialog is closed
+    setPassword('');
+    setPasswordConfirmation('');
     setKeysDialogError(null);
     setKeysDialog(null);
     keysButtonRef.current?.focus();
   };
 
   const saveKeysToFile = async () => {
-    if (passphrase.length < MIN_PASSPHRASE_LENGTH) {
-      setKeysDialogError(`The passphrase must be at least ${MIN_PASSPHRASE_LENGTH} characters long.`);
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setKeysDialogError(`The password must be at least ${MIN_PASSWORD_LENGTH} characters long.`);
       return;
     }
-    if (passphrase !== passphraseConfirmation) {
-      setKeysDialogError("The passphrases don't match.");
+    if (password !== passwordConfirmation) {
+      setKeysDialogError("The passwords don't match.");
       return;
     }
 
@@ -589,7 +589,7 @@ function App() {
 
     setIsKeysDialogBusy(true);
     try {
-      const keysFile = await encryptKeysFile({ savedAt: new Date().toISOString(), environments }, passphrase);
+      const keysFile = await encryptKeysFile({ savedAt: new Date().toISOString(), environments }, password);
       const blob = new Blob([JSON.stringify(keysFile, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -606,7 +606,7 @@ function App() {
     }
   };
 
-  // Called with the file chosen in the file picker; asks for its passphrase if it's a keys file
+  // Called with the file chosen in the file picker; asks for its password if it's a keys file
   const openKeysFile = async (file: File) => {
     const keysFile = parseEncryptedKeysFile(await file.text());
     if (!keysFile) {
@@ -630,11 +630,11 @@ function App() {
     setIsKeysDialogBusy(true);
     let entries: KeysFileEntry[];
     try {
-      const payload = await decryptKeysFile(keysDialog.file, passphrase);
+      const payload = await decryptKeysFile(keysDialog.file, password);
       if (!isValidKeysEntries(payload?.environments)) throw new Error('Unexpected keys file contents');
       entries = payload.environments;
     } catch {
-      setKeysDialogError('Incorrect passphrase, or the file is damaged.');
+      setKeysDialogError('Incorrect password, or the file is damaged.');
       return;
     } finally {
       setIsKeysDialogBusy(false);
@@ -1370,24 +1370,24 @@ function App() {
             </div>
             <p id='keys-dialog-description' className='text-gray-700 mb-6'>
               {keysDialog.mode === 'save'
-                ? `Your keys will be encrypted with this passphrase (at least ${MIN_PASSPHRASE_LENGTH} characters). You'll need it to load the file, and it can't be recovered if you forget it.`
-                : 'Enter the passphrase this file was saved with.'}
+                ? `Your keys will be encrypted with this password (at least ${MIN_PASSWORD_LENGTH} characters). You'll need it to load the file, and it can't be recovered if you forget it.`
+                : 'Enter the password this file was saved with.'}
             </p>
             <div className='space-y-4 mb-6'>
-              <PassphraseInput
-                id='keys-passphrase'
-                label='Passphrase'
-                value={passphrase}
-                onChange={(value) => { setPassphrase(value); setKeysDialogError(null); }}
-                inputRef={passphraseInputRef}
+              <PasswordInput
+                id='keys-password'
+                label='Password'
+                value={password}
+                onChange={(value) => { setPassword(value); setKeysDialogError(null); }}
+                inputRef={passwordInputRef}
                 autoComplete={keysDialog.mode === 'save' ? 'new-password' : 'current-password'}
               />
               {keysDialog.mode === 'save' && (
-                <PassphraseInput
-                  id='keys-passphrase-confirmation'
-                  label='Confirm passphrase'
-                  value={passphraseConfirmation}
-                  onChange={(value) => { setPassphraseConfirmation(value); setKeysDialogError(null); }}
+                <PasswordInput
+                  id='keys-password-confirmation'
+                  label='Confirm password'
+                  value={passwordConfirmation}
+                  onChange={(value) => { setPasswordConfirmation(value); setKeysDialogError(null); }}
                   autoComplete='new-password'
                 />
               )}

@@ -1,7 +1,7 @@
 import type { EncryptedKeysFile, KeysFilePayload } from './types';
 
 // Keys files are encrypted in the browser with the Web Crypto API: AES-GCM with a key derived
-// from the user's passphrase (PBKDF2-SHA-256). Nothing is sent anywhere; without the passphrase
+// from the user's password (PBKDF2-SHA-256). Nothing is sent anywhere; without the password
 // the file can't be read.
 const PBKDF2_ITERATIONS = 600000;
 
@@ -15,8 +15,8 @@ const toBase64 = (bytes: Uint8Array): string => {
 };
 const fromBase64 = (text: string): Uint8Array => Uint8Array.from(atob(text), char => char.charCodeAt(0));
 
-const deriveKey = async (passphrase: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> => {
-  const baseKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+const deriveKey = async (password: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> => {
+  const baseKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
     { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
     baseKey,
@@ -26,10 +26,10 @@ const deriveKey = async (passphrase: string, salt: Uint8Array, iterations: numbe
   );
 };
 
-export const encryptKeysFile = async (payload: KeysFilePayload, passphrase: string): Promise<EncryptedKeysFile> => {
+export const encryptKeysFile = async (payload: KeysFilePayload, password: string): Promise<EncryptedKeysFile> => {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveKey(passphrase, salt, PBKDF2_ITERATIONS);
+  const key = await deriveKey(password, salt, PBKDF2_ITERATIONS);
   const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(payload)));
 
   return {
@@ -57,9 +57,9 @@ export const parseEncryptedKeysFile = (text: string): EncryptedKeysFile | null =
   }
 };
 
-// Throws if the passphrase is wrong or the file was modified (AES-GCM authenticates the data)
-export const decryptKeysFile = async (file: EncryptedKeysFile, passphrase: string): Promise<KeysFilePayload> => {
-  const key = await deriveKey(passphrase, fromBase64(file.kdf.salt), file.kdf.iterations);
+// Throws if the password is wrong or the file was modified (AES-GCM authenticates the data)
+export const decryptKeysFile = async (file: EncryptedKeysFile, password: string): Promise<KeysFilePayload> => {
+  const key = await deriveKey(password, fromBase64(file.kdf.salt), file.kdf.iterations);
   const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromBase64(file.cipher.iv) }, key, fromBase64(file.data));
   return JSON.parse(new TextDecoder().decode(decrypted));
 };
